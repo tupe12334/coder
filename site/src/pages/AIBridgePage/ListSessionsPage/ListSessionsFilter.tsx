@@ -1,10 +1,10 @@
 import { Filter, MenuSkeleton, type useFilter } from "components/Filter/Filter";
 import { type UserFilterMenu, UserMenu } from "components/Filter/UserFilter";
-import type { FC } from "react";
 import {
 	ProviderFilter,
 	type ProviderFilterMenu,
 } from "pages/AIBridgePage/RequestLogsPage/RequestLogsFilter/ProviderFilter";
+import type { FC } from "react";
 
 interface ListSessionsFilterProps {
 	filter: ReturnType<typeof useFilter>;

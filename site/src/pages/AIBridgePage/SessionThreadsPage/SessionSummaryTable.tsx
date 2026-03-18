@@ -1,11 +1,11 @@
 import type { MinimalUser } from "api/typesGenerated";
 import { Avatar } from "components/Avatar/Avatar";
 import { Badge } from "components/Badge/Badge";
-import { formatDateTime } from "utils/time";
 import { AIBridgeClientIcon } from "pages/AIBridgePage/RequestLogsPage/icons/AIBridgeClientIcon";
 import { AIBridgeProviderIcon } from "pages/AIBridgePage/RequestLogsPage/icons/AIBridgeProviderIcon";
-import { getProviderDisplayName, getProviderIconName } from "../utils";
+import { formatDateTime } from "utils/time";
 import { TokenBadges } from "../TokenBadges";
+import { getProviderDisplayName, getProviderIconName } from "../utils";
 
 const Separator = () => (
 	<div className="border-0 border-t border-solid border-border-content-secondary my-1" />

@@ -54,10 +54,9 @@ export const infiniteSession = (
 ): InfiniteSessionQueryOptions => ({
 	queryKey: ["aiBridgeSession", sessionId] as const,
 	queryFn: ({ pageParam }) =>
-		API.getAIBridgeSession(sessionId, { after_id: pageParam ?? undefined }),
+		API.getAIBridgeSession(sessionId, { after_id: pageParam as string }),
 	initialPageParam: null,
 	getNextPageParam: (lastPage) => {
-		const threads = lastPage.threads;
-		return threads.length > 0 ? threads[threads.length - 1].id : null;
+		return lastPage.id;
 	},
 });

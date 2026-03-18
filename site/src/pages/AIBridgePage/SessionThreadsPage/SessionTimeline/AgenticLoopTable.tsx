@@ -1,7 +1,7 @@
 import type { FC } from "react";
 import { cn } from "utils/cn";
-import { roundDurationDisplay } from "../../utils";
 import { TokenBadges } from "../../TokenBadges";
+import { roundDurationDisplay } from "../../utils";
 
 interface AgenticLoopTableProps {
 	duration: number; // in seconds

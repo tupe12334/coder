@@ -19,11 +19,11 @@ import { ChevronDownIcon, ChevronRightIcon, InfoIcon } from "lucide-react";
 import { type FC, useEffect, useRef, useState } from "react";
 import { cn } from "utils/cn";
 import { docs } from "utils/docs";
-import { prettyFormatJSON } from "../../utils";
 import { TokenBadges } from "../../TokenBadges";
+import { prettyFormatJSON } from "../../utils";
+import { AgenticLoopTable } from "./AgenticLoopTable";
 import { PromptTable } from "./PromptTable";
 import { ToolCallTable } from "./ToolCallTable";
-import { AgenticLoopTable } from "./AgenticLoopTable";
 
 interface CollapseButtonProps {
 	isOpen: boolean;

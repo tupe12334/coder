@@ -4775,6 +4775,154 @@ func TestChatDesktopEnabled(t *testing.T) {
 	})
 }
 
+func TestChatWorkspaceTTL(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ReturnsDefaultWhenUnset", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+
+		adminClient := newChatClient(t)
+		coderdtest.CreateFirstUser(t, adminClient)
+
+		resp, err := adminClient.GetChatWorkspaceTTL(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "1h0m0s", resp.WorkspaceTTL)
+	})
+
+	t.Run("AdminCanSet", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+
+		adminClient := newChatClient(t)
+		coderdtest.CreateFirstUser(t, adminClient)
+
+		err := adminClient.UpdateChatWorkspaceTTL(ctx, codersdk.UpdateChatWorkspaceTTLRequest{
+			WorkspaceTTL: "2h",
+		})
+		require.NoError(t, err)
+
+		resp, err := adminClient.GetChatWorkspaceTTL(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "2h0m0s", resp.WorkspaceTTL)
+	})
+
+	t.Run("AdminCanSetZero", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+
+		adminClient := newChatClient(t)
+		coderdtest.CreateFirstUser(t, adminClient)
+
+		err := adminClient.UpdateChatWorkspaceTTL(ctx, codersdk.UpdateChatWorkspaceTTLRequest{
+			WorkspaceTTL: "0s",
+		})
+		require.NoError(t, err)
+
+		resp, err := adminClient.GetChatWorkspaceTTL(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "0s", resp.WorkspaceTTL)
+	})
+
+	t.Run("NonAdminCanRead", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+
+		adminClient := newChatClient(t)
+		firstUser := coderdtest.CreateFirstUser(t, adminClient)
+		memberClient, _ := coderdtest.CreateAnotherUser(t, adminClient, firstUser.OrganizationID)
+
+		err := adminClient.UpdateChatWorkspaceTTL(ctx, codersdk.UpdateChatWorkspaceTTLRequest{
+			WorkspaceTTL: "3h",
+		})
+		require.NoError(t, err)
+
+		resp, err := memberClient.GetChatWorkspaceTTL(ctx)
+		require.NoError(t, err)
+		require.Equal(t, "3h0m0s", resp.WorkspaceTTL)
+	})
+
+	t.Run("NonAdminWriteFails", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+
+		adminClient := newChatClient(t)
+		firstUser := coderdtest.CreateFirstUser(t, adminClient)
+		memberClient, _ := coderdtest.CreateAnotherUser(t, adminClient, firstUser.OrganizationID)
+
+		err := memberClient.UpdateChatWorkspaceTTL(ctx, codersdk.UpdateChatWorkspaceTTLRequest{
+			WorkspaceTTL: "1h",
+		})
+		requireSDKError(t, err, http.StatusForbidden)
+	})
+
+	t.Run("UnauthenticatedFails", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+
+		adminClient := newChatClient(t)
+		coderdtest.CreateFirstUser(t, adminClient)
+
+		anonClient := codersdk.New(adminClient.URL)
+		_, err := anonClient.GetChatWorkspaceTTL(ctx)
+		var sdkErr *codersdk.Error
+		require.ErrorAs(t, err, &sdkErr)
+		require.Equal(t, http.StatusUnauthorized, sdkErr.StatusCode())
+	})
+
+	t.Run("EmptyStringFails", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+
+		adminClient := newChatClient(t)
+		coderdtest.CreateFirstUser(t, adminClient)
+
+		err := adminClient.UpdateChatWorkspaceTTL(ctx, codersdk.UpdateChatWorkspaceTTLRequest{
+			WorkspaceTTL: "",
+		})
+		requireSDKError(t, err, http.StatusBadRequest)
+	})
+
+	t.Run("InvalidDurationFails", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+
+		adminClient := newChatClient(t)
+		coderdtest.CreateFirstUser(t, adminClient)
+
+		err := adminClient.UpdateChatWorkspaceTTL(ctx, codersdk.UpdateChatWorkspaceTTLRequest{
+			WorkspaceTTL: "not-a-duration",
+		})
+		requireSDKError(t, err, http.StatusBadRequest)
+	})
+
+	t.Run("NegativeDurationFails", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+
+		adminClient := newChatClient(t)
+		coderdtest.CreateFirstUser(t, adminClient)
+
+		err := adminClient.UpdateChatWorkspaceTTL(ctx, codersdk.UpdateChatWorkspaceTTLRequest{
+			WorkspaceTTL: "-1h",
+		})
+		requireSDKError(t, err, http.StatusBadRequest)
+	})
+
+	t.Run("ExceedsMaxFails", func(t *testing.T) {
+		t.Parallel()
+		ctx := testutil.Context(t, testutil.WaitLong)
+
+		adminClient := newChatClient(t)
+		coderdtest.CreateFirstUser(t, adminClient)
+
+		err := adminClient.UpdateChatWorkspaceTTL(ctx, codersdk.UpdateChatWorkspaceTTLRequest{
+			WorkspaceTTL: "721h",
+		})
+		requireSDKError(t, err, http.StatusBadRequest)
+	})
+}
+
 func requireSDKError(t *testing.T, err error, expectedStatus int) *codersdk.Error {
 	t.Helper()
 

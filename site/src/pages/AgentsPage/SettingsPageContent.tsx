@@ -5,13 +5,16 @@ import {
 	chatDesktopEnabled,
 	chatSystemPrompt,
 	chatUserCustomPrompt,
+	chatWorkspaceTTL,
 	updateChatDesktopEnabled,
 	updateChatSystemPrompt,
+	updateChatWorkspaceTTL,
 	updateUserChatCustomPrompt,
 } from "api/queries/chats";
 import type * as TypesGen from "api/typesGenerated";
 import { AvatarData } from "components/Avatar/AvatarData";
 import { Button } from "components/Button/Button";
+import { DurationField } from "components/DurationField/DurationField";
 import { Link } from "components/Link/Link";
 import { PaginationAmount } from "components/PaginationWidget/PaginationAmount";
 import { PaginationWidgetBase } from "components/PaginationWidget/PaginationWidgetBase";
@@ -366,6 +369,13 @@ export const SettingsPageContent: FC<SettingsPageContentProps> = ({
 		isError: isSaveDesktopEnabledError,
 	} = useMutation(updateChatDesktopEnabled(queryClient));
 
+	const workspaceTTLQuery = useQuery(chatWorkspaceTTL());
+	const {
+		mutate: saveWorkspaceTTL,
+		isPending: isSavingWorkspaceTTL,
+		isError: isSaveWorkspaceTTLError,
+	} = useMutation(updateChatWorkspaceTTL(queryClient));
+
 	const serverPrompt = systemPromptQuery.data?.system_prompt ?? "";
 	const [localEdit, setLocalEdit] = useState<string | null>(null);
 	const systemPromptDraft = localEdit ?? serverPrompt;
@@ -378,8 +388,17 @@ export const SettingsPageContent: FC<SettingsPageContentProps> = ({
 	const isUserPromptDirty =
 		localUserEdit !== null && localUserEdit !== serverUserPrompt;
 	const desktopEnabled = desktopEnabledQuery.data?.enable_desktop ?? false;
+	// Parse Go duration string (e.g. "1h30m0s") into milliseconds.
+	const serverTTL = workspaceTTLQuery.data?.workspace_ttl ?? "1h0m0s";
+	const serverTTLMs = parseDurationToMs(serverTTL);
+	const [localTTLMs, setLocalTTLMs] = useState<number | null>(null);
+	const ttlMs = localTTLMs ?? serverTTLMs;
+	const isTTLDirty = localTTLMs !== null && localTTLMs !== serverTTLMs;
 	const isDisabled =
-		isSavingSystemPrompt || isSavingUserPrompt || isSavingDesktopEnabled;
+		isSavingSystemPrompt ||
+		isSavingUserPrompt ||
+		isSavingDesktopEnabled ||
+		isSavingWorkspaceTTL;
 
 	const handleSaveSystemPrompt = useCallback(
 		(event: FormEvent) => {
@@ -403,6 +422,23 @@ export const SettingsPageContent: FC<SettingsPageContentProps> = ({
 			);
 		},
 		[isUserPromptDirty, userPromptDraft, saveUserPrompt],
+	);
+
+	const handleSaveWorkspaceTTL = useCallback(
+		(event: FormEvent) => {
+			event.preventDefault();
+			if (!isTTLDirty) return;
+			const totalMs = localTTLMs ?? 0;
+			const totalMinutes = Math.round(totalMs / 60_000);
+			const h = Math.floor(totalMinutes / 60);
+			const m = totalMinutes % 60;
+			const durationStr = `${h}h${m}m`;
+			saveWorkspaceTTL(
+				{ workspace_ttl: durationStr },
+				{ onSuccess: () => setLocalTTLMs(null) },
+			);
+		},
+		[isTTLDirty, localTTLMs, saveWorkspaceTTL],
 	);
 
 	return (
@@ -551,6 +587,42 @@ export const SettingsPageContent: FC<SettingsPageContentProps> = ({
 										</p>
 									)}
 								</div>
+								<hr className="my-5 border-0 border-t border-solid border-border" />
+								<form
+									className="space-y-2"
+									onSubmit={(event) => void handleSaveWorkspaceTTL(event)}
+								>
+									<div className="flex items-center gap-2">
+										<h3 className="m-0 text-[13px] font-semibold text-content-primary">
+											Default Autostop
+										</h3>
+										<AdminBadge />
+									</div>
+									<p className="!mt-0.5 m-0 text-xs text-content-secondary">
+										Time until chat workspaces are stopped after being started.
+										Set to 0 to use the template default.
+									</p>
+									<DurationField
+										label="Default autostop"
+										valueMs={ttlMs}
+										onChange={(v) => setLocalTTLMs(v)}
+										disabled={isDisabled}
+									/>
+									<div className="flex justify-end">
+										<Button
+											size="sm"
+											type="submit"
+											disabled={isDisabled || !isTTLDirty}
+										>
+											Save
+										</Button>
+									</div>
+									{isSaveWorkspaceTTLError && (
+										<p className="m-0 text-xs text-content-destructive">
+											Failed to save autostop setting.
+										</p>
+									)}
+								</form>
 							</>
 						)}
 					</>
@@ -584,3 +656,16 @@ export const SettingsPageContent: FC<SettingsPageContentProps> = ({
 		</div>
 	);
 };
+
+/**
+ * Parse a Go duration string (e.g. "1h30m0s") into milliseconds.
+ * Handles hours (h) and minutes (m). Ignores seconds (s).
+ */
+function parseDurationToMs(duration: string): number {
+	const hours = duration.match(/(\d+)h/);
+	const minutes = duration.match(/(\d+)m/);
+	const totalMinutes =
+		(hours ? Number.parseInt(hours[1], 10) : 0) * 60 +
+		(minutes ? Number.parseInt(minutes[1], 10) : 0);
+	return totalMinutes * 60_000;
+}

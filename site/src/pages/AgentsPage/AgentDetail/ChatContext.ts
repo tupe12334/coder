@@ -1,11 +1,7 @@
 import { watchChat } from "api/api";
 import { chatMessagesKey, updateInfiniteChatsCache } from "api/queries/chats";
 import type * as TypesGen from "api/typesGenerated";
-import {
-	asNumber,
-	asRecord,
-	asString,
-} from "components/ai-elements/runtimeTypeUtils";
+import { asNumber, asString } from "components/ai-elements/runtimeTypeUtils";
 
 import {
 	startTransition,

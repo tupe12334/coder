@@ -2,17 +2,30 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import type * as TypesGen from "api/typesGenerated";
 import { expect, waitFor, within } from "storybook/test";
 import { StreamingOutput } from "./ConversationTimeline";
+import { deriveLiveStatus } from "./liveStatusModel";
 import { applyMessagePartToStreamState, buildStreamTools } from "./streamState";
 import type { RetryState, StreamState } from "./types";
 
 // StreamingOutput renders inside a ConversationItem > Message > MessageContent
 // chain, but it's self-contained enough to render standalone.
 
+const buildLiveStatus = (
+	overrides: Partial<Parameters<typeof deriveLiveStatus>[0]> = {},
+) =>
+	deriveLiveStatus({
+		streamState: null,
+		retryState: null,
+		streamError: null,
+		delayedStartup: false,
+		isAwaitingFirstStreamChunk: false,
+		...overrides,
+	});
+
 const buildStreamRenderState = (
 	parts: readonly TypesGen.ChatMessagePart[],
 ): Pick<
 	React.ComponentProps<typeof StreamingOutput>,
-	"streamState" | "streamTools"
+	"streamState" | "streamTools" | "liveStatus"
 > => {
 	let streamState: StreamState | null = null;
 	for (const part of parts) {
@@ -24,6 +37,7 @@ const buildStreamRenderState = (
 	return {
 		streamState,
 		streamTools: buildStreamTools(streamState),
+		liveStatus: buildLiveStatus({ streamState }),
 	};
 };
 
@@ -64,7 +78,7 @@ export const ThinkingPlaceholder: Story = {
 	args: {
 		streamState: null,
 		streamTools: [],
-		showInitialPlaceholder: true,
+		liveStatus: buildLiveStatus({ isAwaitingFirstStreamChunk: true }),
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -80,8 +94,10 @@ export const RetryWithVisibleReason: Story = {
 	args: {
 		streamState: null,
 		streamTools: [],
-		showInitialPlaceholder: true,
-		retryState: buildRetryState(),
+		liveStatus: buildLiveStatus({
+			retryState: buildRetryState(),
+			isAwaitingFirstStreamChunk: true,
+		}),
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -99,12 +115,14 @@ export const RetryRateLimited: Story = {
 	args: {
 		streamState: null,
 		streamTools: [],
-		showInitialPlaceholder: true,
-		retryState: buildRetryState({
-			attempt: 3,
-			error: "Anthropic asked us to back off briefly before retrying.",
-			kind: "rate_limit",
-			delayMs: 3000,
+		liveStatus: buildLiveStatus({
+			retryState: buildRetryState({
+				attempt: 3,
+				error: "Anthropic asked us to back off briefly before retrying.",
+				kind: "rate_limit",
+				delayMs: 3000,
+			}),
+			isAwaitingFirstStreamChunk: true,
 		}),
 	},
 	play: async ({ canvasElement }) => {
@@ -125,10 +143,12 @@ export const RetryAfterPartialStream: Story = {
 	args: {
 		streamState: null,
 		streamTools: [],
-		showInitialPlaceholder: true,
-		retryState: buildRetryState({
-			attempt: 2,
-			error: "The provider dropped the connection. Retrying now.",
+		liveStatus: buildLiveStatus({
+			retryState: buildRetryState({
+				attempt: 2,
+				error: "The provider dropped the connection. Retrying now.",
+			}),
+			isAwaitingFirstStreamChunk: true,
 		}),
 	},
 	play: async ({ canvasElement }) => {
@@ -148,7 +168,6 @@ export const RetryAfterPartialStream: Story = {
 export const StreamingAfterRetry: Story = {
 	args: {
 		...buildStreamRenderState(resumedParts),
-		retryState: null,
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

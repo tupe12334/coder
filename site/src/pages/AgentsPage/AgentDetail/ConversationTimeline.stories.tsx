@@ -2,6 +2,7 @@ import type { Meta, StoryObj } from "@storybook/react-vite";
 import type * as TypesGen from "api/typesGenerated";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { ConversationTimeline } from "./ConversationTimeline";
+import { deriveLiveStatus } from "./liveStatusModel";
 import { parseMessagesWithMergedTools } from "./messageParsing";
 import { applyMessagePartToStreamState, buildStreamTools } from "./streamState";
 import type { RetryState, StreamState } from "./types";
@@ -18,6 +19,18 @@ const baseMessage = {
 	created_at: "2026-03-10T00:00:00.000Z",
 } as const;
 
+const buildLiveStatus = (
+	overrides: Partial<Parameters<typeof deriveLiveStatus>[0]> = {},
+) =>
+	deriveLiveStatus({
+		streamState: null,
+		retryState: null,
+		streamError: null,
+		delayedStartup: false,
+		isAwaitingFirstStreamChunk: false,
+		...overrides,
+	});
+
 const defaultArgs: Omit<
 	React.ComponentProps<typeof ConversationTimeline>,
 	"parsedMessages"
@@ -26,16 +39,16 @@ const defaultArgs: Omit<
 	hasStreamOutput: false,
 	streamState: null,
 	streamTools: [],
+	liveStatus: buildLiveStatus(),
 	subagentTitles: new Map(),
 	subagentStatusOverrides: new Map(),
-	isAwaitingFirstStreamChunk: false,
 };
 
 const buildStreamRenderState = (
 	parts: readonly TypesGen.ChatMessagePart[],
 ): Pick<
 	React.ComponentProps<typeof ConversationTimeline>,
-	"streamState" | "streamTools"
+	"streamState" | "streamTools" | "liveStatus"
 > => {
 	let streamState: StreamState | null = null;
 	for (const part of parts) {
@@ -47,6 +60,7 @@ const buildStreamRenderState = (
 	return {
 		streamState,
 		streamTools: buildStreamTools(streamState),
+		liveStatus: buildLiveStatus({ streamState }),
 	};
 };
 
@@ -493,8 +507,10 @@ export const RetryWithReason: Story = {
 		...defaultArgs,
 		parsedMessages: [],
 		hasStreamOutput: true,
-		isAwaitingFirstStreamChunk: true,
-		retryState: buildRetryState(),
+		liveStatus: buildLiveStatus({
+			retryState: buildRetryState(),
+			isAwaitingFirstStreamChunk: true,
+		}),
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
@@ -565,11 +581,16 @@ export const DelayedFirstChunk: Story = {
 		...defaultArgs,
 		parsedMessages: retryThenResumeMessages,
 		hasStreamOutput: true,
-		isAwaitingFirstStreamChunk: true,
+		liveStatus: buildLiveStatus({
+			delayedStartup: true,
+			isAwaitingFirstStreamChunk: true,
+		}),
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		expect(canvas.getByText("Thinking...")).toBeVisible();
+		expect(
+			canvas.getByText(/response startup is taking longer than expected/i),
+		).toBeVisible();
 		expect(
 			canvas.queryByRole("heading", { name: /retrying request/i }),
 		).not.toBeInTheDocument();
@@ -583,7 +604,6 @@ export const RetryThenResumedStreaming: Story = {
 		parsedMessages: retryThenResumeMessages,
 		hasStreamOutput: true,
 		...retryThenResumedStream,
-		retryState: null,
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);

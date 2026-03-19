@@ -1,5 +1,5 @@
 import type * as TypesGen from "api/typesGenerated";
-import { Alert, AlertDescription, AlertTitle } from "components/Alert/Alert";
+import { Alert } from "components/Alert/Alert";
 import {
 	ConversationItem,
 	Message,
@@ -11,14 +11,13 @@ import {
 import { WebSearchSources } from "components/ai-elements/tool";
 import { Button } from "components/Button/Button";
 import { FileReferenceChip } from "components/ChatMessageInput/FileReferenceNode";
-import { Pill } from "components/Pill/Pill";
 import { Spinner } from "components/Spinner/Spinner";
 import {
 	Tooltip,
 	TooltipContent,
 	TooltipTrigger,
 } from "components/Tooltip/Tooltip";
-import { ExternalLinkIcon, PencilIcon } from "lucide-react";
+import { PencilIcon } from "lucide-react";
 import {
 	type FC,
 	Fragment,
@@ -33,13 +32,14 @@ import { cn } from "utils/cn";
 import { ImageThumbnail } from "../AgentChatInput";
 import { ImageLightbox } from "../ImageLightbox";
 import type { ChatDetailError } from "../usageLimitMessage";
+import { ChatStatusCallout } from "./ChatStatusCallout";
 import { useSmoothStreamingText } from "./SmoothText";
+import { type LiveStatusModel, toFailedLiveStatus } from "./liveStatusModel";
 import type {
 	MergedTool,
 	ParsedMessageContent,
 	ParsedMessageEntry,
 	RenderBlock,
-	RetryState,
 	StreamState,
 } from "./types";
 
@@ -79,123 +79,6 @@ const ReasoningDisclosure: FC<{
 				</span>
 			</div>
 		</div>
-	);
-};
-
-const PROVIDER_STATUS_URLS: Record<string, string> = {
-	anthropic: "https://status.anthropic.com",
-};
-
-const getErrorTitle = (kind: string, mode: "retry" | "error"): string => {
-	switch (kind) {
-		case "overloaded":
-			return "Service overloaded";
-		case "rate_limit":
-			return "Rate limited";
-		case "timeout":
-			return "Request timeout";
-		default:
-			return mode === "retry" ? "Retrying request" : "Request failed";
-	}
-};
-
-const formatRetryDelay = (delayMs?: number): string | null => {
-	if (delayMs === undefined || delayMs <= 0) {
-		return null;
-	}
-	if (delayMs < 1000) {
-		return `${delayMs} ms`;
-	}
-	if (delayMs < 60_000) {
-		const seconds = delayMs / 1000;
-		return `${seconds.toFixed(seconds >= 10 ? 0 : 1).replace(/\.0$/, "")} seconds`;
-	}
-	const minutes = delayMs / 60_000;
-	return `${minutes.toFixed(minutes >= 10 ? 0 : 1).replace(/\.0$/, "")} minutes`;
-};
-
-const getProviderStatusURL = (
-	kind: string,
-	provider?: string,
-): string | undefined => {
-	if (!provider || kind !== "overloaded") {
-		return undefined;
-	}
-	return PROVIDER_STATUS_URLS[provider.toLowerCase()];
-};
-
-type ErrorCalloutProps = {
-	mode: "retry" | "error";
-	kind: string;
-	message: string;
-	provider?: string;
-	attempt?: number;
-	delayMs?: number;
-	retryable?: boolean;
-	statusCode?: number;
-};
-
-const ErrorCallout: FC<ErrorCalloutProps> = ({
-	mode,
-	kind,
-	message,
-	provider,
-	attempt,
-	delayMs,
-	retryable,
-	statusCode,
-}) => {
-	const statusURL = getProviderStatusURL(kind, provider);
-	const retryDelay = formatRetryDelay(delayMs);
-	const metadata = [
-		...(attempt !== undefined ? [`Attempt ${attempt}`] : []),
-		...(retryDelay ? [`Retrying in ${retryDelay}`] : []),
-		...(provider ? [`Provider ${provider}`] : []),
-		...(statusCode !== undefined ? [`HTTP ${statusCode}`] : []),
-		...(mode === "error" && retryable !== undefined
-			? [retryable ? "Retryable" : "Not retryable"]
-			: []),
-	];
-	const pillType =
-		mode === "error" ? "error" : kind === "generic" ? "inactive" : "warning";
-
-	return (
-		<Alert
-			severity={
-				mode === "error" ? "error" : kind === "generic" ? "info" : "warning"
-			}
-			className="py-3"
-			actions={
-				statusURL && (
-					<Button asChild variant="subtle" size="sm">
-						<a href={statusURL} target="_blank" rel="noreferrer">
-							Status
-							<ExternalLinkIcon />
-						</a>
-					</Button>
-				)
-			}
-		>
-			<div className="space-y-2.5">
-				<div className="flex flex-wrap items-center gap-2">
-					<AlertTitle>{getErrorTitle(kind, mode)}</AlertTitle>
-					<Pill
-						className="h-5 px-2.5 text-[10px] font-semibold"
-						type={pillType}
-					>
-						{kind}
-					</Pill>
-				</div>
-				<AlertDescription>{message}</AlertDescription>
-				{metadata.length > 0 && (
-					<div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-content-secondary">
-						{metadata.map((item) => (
-							<span key={item}>{item}</span>
-						))}
-					</div>
-				)}
-			</div>
-		</Alert>
 	);
 };
 
@@ -616,9 +499,7 @@ export const StreamingOutput = memo<{
 	streamTools: readonly MergedTool[];
 	subagentTitles?: Map<string, string>;
 	subagentStatusOverrides?: Map<string, TypesGen.ChatStatus>;
-	showInitialPlaceholder?: boolean;
-	retryState?: RetryState | null;
-	delayedStartup?: boolean;
+	liveStatus: LiveStatusModel;
 	urlTransform?: UrlTransform;
 }>(
 	({
@@ -626,88 +507,54 @@ export const StreamingOutput = memo<{
 		streamTools,
 		subagentTitles,
 		subagentStatusOverrides,
-		showInitialPlaceholder = false,
-		retryState,
-		delayedStartup = false,
+		liveStatus,
 		urlTransform,
 	}) => {
+		if (liveStatus.phase === "idle") {
+			return null;
+		}
+
 		const conversationItemProps = { role: "assistant" as const };
+		const isStreaming = liveStatus.phase === "streaming";
 		const toolByID = new Map(streamTools.map((tool) => [tool.id, tool]));
-		const blocks = streamState?.blocks ?? [];
+		const blocks = isStreaming ? (streamState?.blocks ?? []) : [];
 		const { elements: orderedBlocks, renderedToolIDs } = renderBlockList({
 			blocks,
 			toolByID,
 			keyPrefix: "stream",
-			isStreaming: true,
+			isStreaming,
 			subagentTitles,
 			subagentStatusOverrides,
 			urlTransform,
 		});
-		const remainingTools = streamTools.filter(
-			(tool) => !renderedToolIDs.has(tool.id),
-		);
-		const showThinkingPlaceholder =
-			showInitialPlaceholder ||
-			(streamState && orderedBlocks.length === 0 && streamTools.length === 0);
-		const showDelayedStartup =
-			showInitialPlaceholder && delayedStartup && !retryState;
-		const initialPlaceholderText = showDelayedStartup
-			? "Response startup is taking longer than expected"
-			: "Thinking...";
+		const remainingTools = isStreaming
+			? streamTools.filter((tool) => !renderedToolIDs.has(tool.id))
+			: [];
 
 		return (
 			<ConversationItem {...conversationItemProps}>
 				<Message className="w-full">
 					<MessageContent className="whitespace-normal">
 						<div className="space-y-3">
-							{orderedBlocks}
-							{retryState && (
-								<ErrorCallout
-									mode="retry"
-									kind={retryState.kind}
-									message={retryState.error}
-									provider={retryState.provider}
-									attempt={retryState.attempt}
-									delayMs={retryState.delayMs}
-								/>
+							{isStreaming ? (
+								<>
+									{orderedBlocks}
+									{remainingTools.map((tool) => (
+										<Tool
+											key={tool.id}
+											name={tool.name}
+											args={tool.args}
+											result={tool.result}
+											status={tool.status}
+											isError={tool.isError}
+											subagentTitles={subagentTitles}
+											subagentStatusOverrides={subagentStatusOverrides}
+										/>
+									))}
+								</>
+							) : (
+								<ChatStatusCallout status={liveStatus} />
 							)}
-							{showThinkingPlaceholder ? (
-								<div className="relative">
-									<Response aria-hidden className="invisible">
-										{showDelayedStartup
-											? initialPlaceholderText
-											: `${initialPlaceholderText}${retryState ? ` attempt ${retryState.attempt}` : ""}`}
-									</Response>
-									<div className="pointer-events-none absolute inset-0 flex items-baseline gap-2">
-										{showDelayedStartup ? (
-											<span className="text-[13px] leading-relaxed text-content-secondary">
-												{initialPlaceholderText}
-											</span>
-										) : (
-											<Shimmer as="div" className="text-[13px] leading-relaxed">
-												Thinking...
-											</Shimmer>
-										)}
-										{retryState && (
-											<span className="text-[11px] text-content-secondary">
-												attempt {retryState.attempt}
-											</span>
-										)}
-									</div>
-								</div>
-							) : null}
-							{remainingTools.map((tool) => (
-								<Tool
-									key={tool.id}
-									name={tool.name}
-									args={tool.args}
-									result={tool.result}
-									status={tool.status}
-									isError={tool.isError}
-									subagentTitles={subagentTitles}
-									subagentStatusOverrides={subagentStatusOverrides}
-								/>
-							))}
 						</div>
 					</MessageContent>
 				</Message>
@@ -988,11 +835,9 @@ interface ConversationTimelineProps {
 	hasStreamOutput: boolean;
 	streamState: StreamState | null;
 	streamTools: readonly MergedTool[];
+	liveStatus: LiveStatusModel;
 	subagentTitles: Map<string, string>;
 	subagentStatusOverrides: Map<string, TypesGen.ChatStatus>;
-	retryState?: RetryState | null;
-	delayedStartup?: boolean;
-	isAwaitingFirstStreamChunk: boolean;
 	detailError?: ChatDetailError | null;
 	onOpenAnalytics?: () => void;
 	onEditUserMessage?: (
@@ -1011,11 +856,9 @@ export const ConversationTimeline: FC<ConversationTimelineProps> = ({
 	hasStreamOutput,
 	streamState,
 	streamTools,
+	liveStatus,
 	subagentTitles,
 	subagentStatusOverrides,
-	retryState,
-	delayedStartup = false,
-	isAwaitingFirstStreamChunk,
 	detailError,
 	onOpenAnalytics,
 	onEditUserMessage,
@@ -1025,8 +868,17 @@ export const ConversationTimeline: FC<ConversationTimelineProps> = ({
 }) => {
 	const shouldRenderStreamAfterMessages =
 		hasStreamOutput && parsedMessages.length > 0;
-	const isUsageLimitError = detailError?.kind === "usage-limit";
-	const showUsageAction = onOpenAnalytics !== undefined && isUsageLimitError;
+	const usageLimitError =
+		detailError?.kind === "usage-limit" ? detailError : null;
+	const showUsageAction =
+		onOpenAnalytics !== undefined && usageLimitError !== null;
+	const terminalStatus = usageLimitError
+		? null
+		: liveStatus.phase === "failed"
+			? liveStatus
+			: detailError
+				? toFailedLiveStatus(detailError)
+				: null;
 
 	// Build a set of message IDs that appear after the message
 	// currently being edited so they can be visually faded.
@@ -1078,11 +930,9 @@ export const ConversationTimeline: FC<ConversationTimelineProps> = ({
 						<StreamingOutput
 							streamState={streamState}
 							streamTools={streamTools}
+							liveStatus={liveStatus}
 							subagentTitles={subagentTitles}
 							subagentStatusOverrides={subagentStatusOverrides}
-							showInitialPlaceholder={isAwaitingFirstStreamChunk}
-							retryState={retryState}
-							delayedStartup={delayedStartup}
 							urlTransform={urlTransform}
 						/>
 					)}
@@ -1090,41 +940,31 @@ export const ConversationTimeline: FC<ConversationTimelineProps> = ({
 						<StreamingOutput
 							streamState={streamState}
 							streamTools={streamTools}
+							liveStatus={liveStatus}
 							subagentTitles={subagentTitles}
 							subagentStatusOverrides={subagentStatusOverrides}
-							showInitialPlaceholder={isAwaitingFirstStreamChunk}
-							retryState={retryState}
-							delayedStartup={delayedStartup}
 							urlTransform={urlTransform}
 						/>
 					)}
 				</div>
 			)}
-			{detailError &&
-				(isUsageLimitError ? (
-					<Alert
-						severity="info"
-						className="py-2"
-						actions={
-							showUsageAction && (
-								<Button variant="subtle" size="sm" onClick={onOpenAnalytics}>
-									View Usage
-								</Button>
-							)
-						}
-					>
-						{detailError.message}
-					</Alert>
-				) : (
-					<ErrorCallout
-						mode="error"
-						kind={detailError.kind}
-						message={detailError.message}
-						provider={detailError.provider}
-						retryable={detailError.retryable}
-						statusCode={detailError.statusCode}
-					/>
-				))}
+			{usageLimitError ? (
+				<Alert
+					severity="info"
+					className="py-2"
+					actions={
+						showUsageAction && (
+							<Button variant="subtle" size="sm" onClick={onOpenAnalytics}>
+								View Usage
+							</Button>
+						)
+					}
+				>
+					{usageLimitError.message}
+				</Alert>
+			) : terminalStatus ? (
+				<ChatStatusCallout status={terminalStatus} />
+			) : null}
 		</div>
 	);
 };

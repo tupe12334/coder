@@ -2007,9 +2007,12 @@ describe("useChatStore", () => {
 		});
 
 		await act(async () => {});
-		expect(result.current.retryState).toEqual({
+		expect(result.current.retryState).toMatchObject({
 			attempt: 2,
 			error: "upstream timeout",
+			kind: "generic",
+			delayMs: 5000,
+			retryingAt: "2025-01-01T00:01:00.000Z",
 		});
 		expect(result.current.delayedStartup).toBe(false);
 

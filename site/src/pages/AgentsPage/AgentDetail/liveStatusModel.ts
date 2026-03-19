@@ -35,11 +35,6 @@ export type DeriveLiveStatusParams = {
 	isAwaitingFirstStreamChunk: boolean;
 };
 
-const LIVE_STATUS_IDLE: LiveStatusModel = { phase: "idle" };
-const LIVE_STATUS_STARTING: LiveStatusModel = { phase: "starting" };
-const LIVE_STATUS_DELAYED_START: LiveStatusModel = { phase: "delayed_start" };
-const LIVE_STATUS_STREAMING: LiveStatusModel = { phase: "streaming" };
-
 export const toFailedLiveStatus = (
 	error: ChatDetailError,
 ): Extract<LiveStatusModel, { phase: "failed" }> => ({
@@ -77,16 +72,16 @@ export const deriveLiveStatus = ({
 	}
 
 	if (delayedStartup) {
-		return LIVE_STATUS_DELAYED_START;
+		return { phase: "delayed_start" };
 	}
 
 	if (isAwaitingFirstStreamChunk) {
-		return LIVE_STATUS_STARTING;
+		return { phase: "starting" };
 	}
 
 	if (streamState !== null) {
-		return LIVE_STATUS_STREAMING;
+		return { phase: "streaming" };
 	}
 
-	return LIVE_STATUS_IDLE;
+	return { phase: "idle" };
 };

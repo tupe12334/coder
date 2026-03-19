@@ -1,5 +1,5 @@
-import type { ChatDetailError } from "../usageLimitMessage";
 import { describe, expect, it } from "vitest";
+import type { ChatDetailError } from "../usageLimitMessage";
 import { deriveLiveStatus } from "./liveStatusModel";
 import type { RetryState, StreamState } from "./types";
 
@@ -44,51 +44,34 @@ const derive = (
 	});
 
 describe("deriveLiveStatus", () => {
-	it("returns idle when no live inputs are present", () => {
-		expect(derive()).toEqual({ phase: "idle" });
-	});
-
-	it("returns starting while awaiting the first chunk", () => {
-		expect(derive({ isAwaitingFirstStreamChunk: true })).toEqual({
-			phase: "starting",
-		});
-	});
-
-	it("returns delayed_start when delayed startup is active", () => {
-		expect(derive({ delayedStartup: true })).toEqual({
-			phase: "delayed_start",
-		});
-	});
-
-	it("returns retrying details from retryState", () => {
-		expect(derive({ retryState: makeRetryState() })).toEqual({
-			phase: "retrying",
-			title: "Retrying request",
-			kind: "generic",
-			message: "Retrying request shortly.",
-			attempt: 2,
-			provider: "anthropic",
-			delayMs: 2000,
-			retryingAt: "2026-03-10T00:00:02.000Z",
-		});
-	});
-
-	it("returns failed details from streamError", () => {
-		expect(derive({ streamError: makeStreamError() })).toEqual({
-			phase: "failed",
-			title: "Request failed",
-			kind: "generic",
-			message: "Chat processing failed.",
-			provider: "anthropic",
-			retryable: false,
-			statusCode: 500,
-		});
-	});
-
-	it("returns streaming when streamState exists with no higher priority status", () => {
-		expect(derive({ streamState: makeStreamState() })).toEqual({
-			phase: "streaming",
-		});
+	const retryingStatus = {
+		phase: "retrying",
+		title: "Retrying request",
+		kind: "generic",
+		message: "Retrying request shortly.",
+		attempt: 2,
+		provider: "anthropic",
+		delayMs: 2000,
+		retryingAt: "2026-03-10T00:00:02.000Z",
+	};
+	const failedStatus = {
+		phase: "failed",
+		title: "Request failed",
+		kind: "generic",
+		message: "Chat processing failed.",
+		provider: "anthropic",
+		retryable: false,
+		statusCode: 500,
+	};
+	it.each([
+		["idle", undefined, { phase: "idle" }],
+		["starting", { isAwaitingFirstStreamChunk: true }, { phase: "starting" }],
+		["delayed_start", { delayedStartup: true }, { phase: "delayed_start" }],
+		["retrying", { retryState: makeRetryState() }, retryingStatus],
+		["failed", { streamError: makeStreamError() }, failedStatus],
+		["streaming", { streamState: makeStreamState() }, { phase: "streaming" }],
+	])("returns %s", (_phase, overrides, expected) => {
+		expect(derive(overrides)).toEqual(expected);
 	});
 
 	it("prioritizes retrying over failed", () => {

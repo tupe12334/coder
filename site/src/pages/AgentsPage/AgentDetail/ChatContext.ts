@@ -42,22 +42,12 @@ const toChatStreamEvents = (data: unknown): TypesGen.ChatStreamEvent[] => {
 	return [];
 };
 
-const normalizeErrorKind = (value: unknown): string => {
-	const kind = asString(value).trim();
-	return kind || "generic";
-};
-
-const normalizeProvider = (value: unknown): string | undefined => {
-	const provider = asString(value).trim();
-	return provider || undefined;
-};
-
 const normalizeChatDetailError = (
 	error: TypesGen.ChatStreamError | Record<string, unknown> | undefined,
 ): ChatDetailError => ({
 	message: asString(error?.message).trim() || "Chat processing failed.",
-	kind: normalizeErrorKind(error?.kind),
-	provider: normalizeProvider(error?.provider),
+	kind: asString(error?.kind).trim() || "generic",
+	provider: asString(error?.provider).trim() || undefined,
 	retryable:
 		typeof error?.retryable === "boolean" ? error.retryable : undefined,
 	statusCode: asNumber(error?.status_code),
@@ -69,8 +59,8 @@ const normalizeRetryState = (retry: TypesGen.ChatStreamRetry): RetryState => {
 	return {
 		attempt: Math.max(1, asNumber(retry.attempt) ?? 1),
 		error: asString(retry.error).trim() || "Retrying request shortly.",
-		kind: normalizeErrorKind(retry.kind),
-		provider: normalizeProvider(retry.provider),
+		kind: asString(retry.kind).trim() || "generic",
+		provider: asString(retry.provider).trim() || undefined,
 		...(delayMs !== undefined ? { delayMs } : {}),
 		...(retryingAt ? { retryingAt } : {}),
 	};
@@ -404,9 +394,6 @@ export const createChatStore = (): ChatStore => {
 			}));
 		},
 		setStreamError: (reason) => {
-			if (chatDetailErrorsEqual(state.streamError, reason)) {
-				return;
-			}
 			setState((current) => {
 				if (chatDetailErrorsEqual(current.streamError, reason)) {
 					return current;
@@ -427,9 +414,6 @@ export const createChatStore = (): ChatStore => {
 			}));
 		},
 		setRetryState: (retryState) => {
-			if (retryStatesEqual(state.retryState, retryState)) {
-				return;
-			}
 			setState((current) => {
 				if (retryStatesEqual(current.retryState, retryState)) {
 					return current;

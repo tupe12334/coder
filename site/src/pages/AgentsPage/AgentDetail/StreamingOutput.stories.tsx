@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import { expect, screen, waitFor, within } from "storybook/test";
+import { expect, screen, within } from "storybook/test";
 import { StreamingOutput } from "./ConversationTimeline";
 import {
 	buildLiveStatus,
@@ -112,10 +112,7 @@ export const RetryOverloaded: Story = {
 		expect(canvas.getByText("overloaded")).toBeVisible();
 		const statusLink = screen.getByRole("link", { name: /status/i });
 		expect(statusLink).toBeVisible();
-		expect(statusLink).toHaveAttribute(
-			"href",
-			"https://status.anthropic.com",
-		);
+		expect(statusLink).toHaveAttribute("href", "https://status.anthropic.com");
 	},
 };
 
@@ -140,32 +137,6 @@ export const RetryTimeout: Story = {
 		expect(canvas.getByText("timeout")).toBeVisible();
 		expect(
 			canvas.queryByRole("link", { name: /status/i }),
-		).not.toBeInTheDocument();
-	},
-};
-
-/** Retrying clears stale streamed content before rendering the callout. */
-export const RetryAfterPartialStream: Story = {
-	args: {
-		streamState: null,
-		streamTools: [],
-		liveStatus: buildLiveStatus({
-			retryState: buildRetryState({
-				attempt: 2,
-				error: "The provider dropped the connection. Retrying now.",
-			}),
-			isAwaitingFirstStreamChunk: true,
-		}),
-	},
-	play: async ({ canvasElement }) => {
-		const canvas = within(canvasElement);
-		await waitFor(() => {
-			expect(
-				canvas.getByRole("heading", { name: /retrying request/i }),
-			).toBeVisible();
-		});
-		expect(
-			canvas.queryByText(/this partial answer should disappear/i),
 		).not.toBeInTheDocument();
 	},
 };

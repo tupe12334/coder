@@ -50,7 +50,9 @@ export const buildStreamRenderState = (
 	};
 };
 
-export const buildRetryState = (overrides: Partial<RetryState> = {}): RetryState => ({
+export const buildRetryState = (
+	overrides: Partial<RetryState> = {},
+): RetryState => ({
 	attempt: 1,
 	error:
 		"Anthropic is retrying your request after a transient upstream failure.",
@@ -65,20 +67,5 @@ export const textResponseStreamParts = [
 	{
 		type: "text",
 		text: "Storybook streamed answer.",
-	},
-] satisfies readonly TypesGen.ChatMessagePart[];
-
-export const toolCallWithResultStreamParts = [
-	{
-		type: "tool-call",
-		tool_call_id: "tool-call-1",
-		tool_name: "read_file",
-		args: { path: "README.md" },
-	},
-	{
-		type: "tool-result",
-		tool_call_id: "tool-call-1",
-		tool_name: "read_file",
-		result: { content: "# README" },
 	},
 ] satisfies readonly TypesGen.ChatMessagePart[];

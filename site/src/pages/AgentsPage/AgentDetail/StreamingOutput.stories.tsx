@@ -11,6 +11,20 @@ import {
 // StreamingOutput renders inside a ConversationItem > Message > MessageContent
 // chain, but it's self-contained enough to render standalone.
 
+// StatusPlaceholder renders text twice (invisible spacer + visible node).
+// This helper skips the aria-hidden duplicate so assertions stay unique.
+const visibleByText = (
+	canvas: ReturnType<typeof within>,
+	text: string | RegExp,
+) => {
+	const matches = canvas.getAllByText(text);
+	const visible = matches.find(
+		(el: HTMLElement) => !el.closest("[aria-hidden]"),
+	);
+	if (!visible) throw new Error(`No visible element found with text: ${text}`);
+	return visible;
+};
+
 const meta: Meta<typeof StreamingOutput> = {
 	title: "pages/AgentsPage/AgentDetail/StreamingOutput",
 	component: StreamingOutput,
@@ -34,7 +48,7 @@ export const ThinkingPlaceholder: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		expect(canvas.getByText("Thinking...")).toBeVisible();
+		expect(visibleByText(canvas, "Thinking...")).toBeVisible();
 		expect(
 			canvas.queryByRole("heading", { name: /retrying request/i }),
 		).not.toBeInTheDocument();
@@ -58,7 +72,7 @@ export const RetryWithVisibleReason: Story = {
 		).toBeVisible();
 		expect(canvas.getByText(/transient upstream failure/i)).toBeVisible();
 		expect(canvas.getByText("generic")).toBeVisible();
-		expect(canvas.getByText(/attempt 1/i)).toBeVisible();
+		expect(visibleByText(canvas, /attempt 1/i)).toBeVisible();
 	},
 };
 
@@ -148,7 +162,7 @@ export const StreamingAfterRetry: Story = {
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		expect(canvas.getByText(/storybook streamed answer/i)).toBeVisible();
+		expect(await canvas.findByText(/storybook streamed answer/i)).toBeVisible();
 		expect(
 			canvas.queryByRole("heading", { name: /retrying request/i }),
 		).not.toBeInTheDocument();

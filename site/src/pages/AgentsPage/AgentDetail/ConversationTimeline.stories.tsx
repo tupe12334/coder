@@ -10,6 +10,20 @@ import {
 	textResponseStreamParts,
 } from "./storyFixtures";
 
+// StatusPlaceholder renders text twice (invisible spacer + visible node).
+// This helper skips the aria-hidden duplicate so assertions stay unique.
+const visibleByText = (
+	canvas: ReturnType<typeof within>,
+	text: string | RegExp,
+) => {
+	const matches = canvas.getAllByText(text);
+	const visible = matches.find(
+		(el: HTMLElement) => !el.closest("[aria-hidden]"),
+	);
+	if (!visible) throw new Error(`No visible element found with text: ${text}`);
+	return visible;
+};
+
 // 1×1 solid coral (#FF6B6B) PNG encoded as base64.
 const TEST_PNG_B64 =
 	"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4n539HwAHFwLVF8kc1wAAAABJRU5ErkJggg==";
@@ -472,7 +486,7 @@ export const RetryWithReason: Story = {
 		).toBeVisible();
 		expect(canvas.getByText(/transient upstream failure/i)).toBeVisible();
 		expect(canvas.getByText("generic")).toBeVisible();
-		expect(canvas.getByText(/attempt 2/i)).toBeVisible();
+		expect(visibleByText(canvas, /attempt 2/i)).toBeVisible();
 	},
 };
 
@@ -529,10 +543,7 @@ export const StreamErrorTerminalFailure: Story = {
 		expect(canvas.getByText(/http 529/i)).toBeVisible();
 		const statusLink = canvas.getByRole("link", { name: /status/i });
 		expect(statusLink).toBeVisible();
-		expect(statusLink).toHaveAttribute(
-			"href",
-			"https://status.anthropic.com",
-		);
+		expect(statusLink).toHaveAttribute("href", "https://status.anthropic.com");
 	},
 };
 
@@ -578,7 +589,7 @@ export const DelayedFirstChunk: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		expect(
-			canvas.getByText(/response startup is taking longer than expected/i),
+			visibleByText(canvas, /response startup is taking longer than expected/i),
 		).toBeVisible();
 		expect(
 			canvas.queryByRole("heading", { name: /retrying request/i }),

@@ -11,11 +11,14 @@ import {
 } from "./AgentChatInput";
 import {
 	selectChatStatus,
+	selectDelayedStartup,
 	selectHasStreamState,
 	selectIsAwaitingFirstStreamChunk,
 	selectMessagesByID,
 	selectOrderedMessageIDs,
 	selectQueuedMessages,
+	selectRetryState,
+	selectStreamError,
 	selectStreamState,
 	selectSubagentStatusOverrides,
 	useChatSelector,
@@ -33,15 +36,6 @@ import type { ChatDetailError } from "./usageLimitMessage";
 import { useFileAttachments } from "./useFileAttachments";
 
 type ChatStoreHandle = ReturnType<typeof useChatStore>["store"];
-
-const selectLiveStatus = (state: ReturnType<ChatStoreHandle["getSnapshot"]>) =>
-	deriveLiveStatus({
-		streamState: state.streamState,
-		retryState: state.retryState,
-		streamError: state.streamError,
-		delayedStartup: state.delayedStartup,
-		isAwaitingFirstStreamChunk: selectIsAwaitingFirstStreamChunk(state),
-	});
 
 const isChatMessage = (
 	message: TypesGen.ChatMessage | undefined,
@@ -77,7 +71,31 @@ export const AgentDetailTimeline: FC<AgentDetailTimelineProps> = ({
 		store,
 		selectSubagentStatusOverrides,
 	);
-	const liveStatus = useChatSelector(store, selectLiveStatus);
+	const retryState = useChatSelector(store, selectRetryState);
+	const streamError = useChatSelector(store, selectStreamError);
+	const delayedStartup = useChatSelector(store, selectDelayedStartup);
+	const isAwaitingFirstStreamChunk = useChatSelector(
+		store,
+		selectIsAwaitingFirstStreamChunk,
+	);
+
+	const liveStatus = useMemo(
+		() =>
+			deriveLiveStatus({
+				streamState,
+				retryState,
+				streamError,
+				delayedStartup,
+				isAwaitingFirstStreamChunk,
+			}),
+		[
+			streamState,
+			retryState,
+			streamError,
+			delayedStartup,
+			isAwaitingFirstStreamChunk,
+		],
+	);
 
 	const messages = useMemo(
 		() =>

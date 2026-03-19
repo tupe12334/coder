@@ -2,7 +2,7 @@ import type { Workspace } from "api/typesGenerated";
 import type { WorkspacePermissions } from "modules/workspaces/permissions";
 import { createContext, useContext } from "react";
 
-export type WorkspaceSettingsContext = {
+type WorkspaceSettingsContext = {
 	owner: string;
 	workspace: Workspace;
 	permissions?: WorkspacePermissions;

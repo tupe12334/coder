@@ -1,4 +1,4 @@
-export const PROVIDER_STATUS_URLS: Record<string, string> = {
+const PROVIDER_STATUS_URLS: Record<string, string> = {
 	anthropic: "https://status.anthropic.com",
 };
 

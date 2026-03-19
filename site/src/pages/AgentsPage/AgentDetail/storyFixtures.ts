@@ -7,7 +7,7 @@ import {
 import { applyMessagePartToStreamState, buildStreamTools } from "./streamState";
 import type { MergedTool, RetryState, StreamState } from "./types";
 
-export type StoryStreamRenderState = {
+type StoryStreamRenderState = {
 	streamState: StreamState | null;
 	streamTools: readonly MergedTool[];
 	liveStatus: LiveStatusModel;

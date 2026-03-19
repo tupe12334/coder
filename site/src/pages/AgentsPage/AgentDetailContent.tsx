@@ -11,7 +11,9 @@ import {
 } from "./AgentChatInput";
 import {
 	selectChatStatus,
+	selectDelayedStartup,
 	selectHasStreamState,
+	selectIsAwaitingFirstStreamChunk,
 	selectMessagesByID,
 	selectOrderedMessageIDs,
 	selectQueuedMessages,
@@ -71,6 +73,11 @@ export const AgentDetailTimeline: FC<AgentDetailTimelineProps> = ({
 		selectSubagentStatusOverrides,
 	);
 	const retryState = useChatSelector(store, selectRetryState);
+	const delayedStartup = useChatSelector(store, selectDelayedStartup);
+	const isAwaitingFirstStreamChunk = useChatSelector(
+		store,
+		selectIsAwaitingFirstStreamChunk,
+	);
 
 	const messages = useMemo(
 		() =>
@@ -97,13 +104,6 @@ export const AgentDetailTimeline: FC<AgentDetailTimelineProps> = ({
 			: undefined) ??
 		streamError ??
 		undefined;
-	const latestMessage = messages[messages.length - 1];
-	const latestMessageNeedsAssistantResponse =
-		!latestMessage || latestMessage.role !== "assistant";
-	const isAwaitingFirstStreamChunk =
-		!streamState &&
-		(chatStatus === "running" || chatStatus === "pending") &&
-		latestMessageNeedsAssistantResponse;
 	const hasStreamOutput = Boolean(streamState) || isAwaitingFirstStreamChunk;
 
 	return (
@@ -116,6 +116,7 @@ export const AgentDetailTimeline: FC<AgentDetailTimelineProps> = ({
 			subagentTitles={subagentTitles}
 			subagentStatusOverrides={subagentStatusOverrides}
 			retryState={retryState}
+			delayedStartup={delayedStartup}
 			isAwaitingFirstStreamChunk={isAwaitingFirstStreamChunk}
 			detailError={detailError}
 			onOpenAnalytics={onOpenAnalytics}

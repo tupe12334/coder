@@ -199,6 +199,8 @@ const retryStatesEqual = (
 	);
 };
 
+export const RESPONSE_STARTUP_GRACE_MS = 15_000;
+
 type ChatStoreState = {
 	messagesByID: Map<number, TypesGen.ChatMessage>;
 	orderedMessageIDs: readonly number[];
@@ -206,6 +208,7 @@ type ChatStoreState = {
 	chatStatus: TypesGen.ChatStatus | null;
 	streamError: ChatDetailError | null;
 	retryState: RetryState | null;
+	delayedStartup: boolean;
 	queuedMessages: readonly TypesGen.ChatQueuedMessage[];
 	subagentStatusOverrides: Map<string, TypesGen.ChatStatus>;
 };
@@ -230,6 +233,7 @@ type ChatStore = {
 	clearStreamError: () => void;
 	setRetryState: (state: RetryState | null) => void;
 	clearRetryState: () => void;
+	setDelayedStartup: (delayedStartup: boolean) => void;
 	clearStreamState: () => void;
 	setSubagentStatusOverride: (
 		chatID: string,
@@ -245,6 +249,7 @@ const createInitialState = (): ChatStoreState => ({
 	chatStatus: null,
 	streamError: null,
 	retryState: null,
+	delayedStartup: false,
 	queuedMessages: [],
 	subagentStatusOverrides: new Map(),
 });
@@ -444,6 +449,15 @@ export const createChatStore = (): ChatStore => {
 				retryState: null,
 			}));
 		},
+		setDelayedStartup: (delayedStartup) => {
+			if (state.delayedStartup === delayedStartup) {
+				return;
+			}
+			setState((current) => ({
+				...current,
+				delayedStartup,
+			}));
+		},
 		clearStreamState: () => {
 			if (state.streamState === null) {
 				return;
@@ -471,6 +485,7 @@ export const createChatStore = (): ChatStore => {
 				state.streamState === null &&
 				state.streamError === null &&
 				state.retryState === null &&
+				state.delayedStartup === false &&
 				state.subagentStatusOverrides.size === 0
 			) {
 				return;
@@ -480,6 +495,7 @@ export const createChatStore = (): ChatStore => {
 				streamState: null,
 				streamError: null,
 				retryState: null,
+				delayedStartup: false,
 				subagentStatusOverrides: new Map(),
 			}));
 		},
@@ -509,6 +525,42 @@ export const selectQueuedMessages = (state: ChatStoreState) =>
 export const selectSubagentStatusOverrides = (state: ChatStoreState) =>
 	state.subagentStatusOverrides;
 export const selectRetryState = (state: ChatStoreState) => state.retryState;
+export const selectDelayedStartup = (state: ChatStoreState) =>
+	state.delayedStartup;
+
+const selectLatestDurableMessage = (
+	state: ChatStoreState,
+): TypesGen.ChatMessage | undefined => {
+	const latestMessageID =
+		state.orderedMessageIDs[state.orderedMessageIDs.length - 1];
+	return latestMessageID === undefined
+		? undefined
+		: state.messagesByID.get(latestMessageID);
+};
+
+export const selectIsAwaitingFirstStreamChunk = (
+	state: ChatStoreState,
+): boolean => {
+	const latestMessage = selectLatestDurableMessage(state);
+	const latestMessageNeedsAssistantResponse =
+		!latestMessage || latestMessage.role !== "assistant";
+	return (
+		state.streamState === null &&
+		(state.chatStatus === "running" || state.chatStatus === "pending") &&
+		latestMessageNeedsAssistantResponse
+	);
+};
+
+export const useChatSelector = <T>(
+	store: ChatStore,
+	selector: (state: ChatStoreState) => T,
+): T => {
+	const getSnapshot = useCallback(
+		() => selector(store.getSnapshot()),
+		[selector, store],
+	);
+	return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
+};
 
 export const useChatStore = (
 	options: UseChatStoreOptions,
@@ -526,6 +578,7 @@ export const useChatStore = (
 	const queryClient = useQueryClient();
 	const storeRef = useRef<ChatStore>(createChatStore());
 	const streamResetFrameRef = useRef<number | null>(null);
+	const delayedStartupTimerRef = useRef<number | null>(null);
 	const queuedMessagesHydratedChatIDRef = useRef<string | null>(null);
 	// Tracks whether the WebSocket has delivered a queue_update for the
 	// current chat. When true, the stream is the authoritative source
@@ -583,6 +636,14 @@ export const useChatStore = (
 		}
 		window.cancelAnimationFrame(streamResetFrameRef.current);
 		streamResetFrameRef.current = null;
+	}, []);
+
+	const cancelDelayedStartupTimer = useCallback(() => {
+		if (delayedStartupTimerRef.current === null) {
+			return;
+		}
+		window.clearTimeout(delayedStartupTimerRef.current);
+		delayedStartupTimerRef.current = null;
 	}, []);
 
 	const scheduleStreamReset = useCallback(() => {
@@ -661,6 +722,50 @@ export const useChatStore = (
 	useEffect(() => {
 		store.setChatStatus(chatRecord?.status ?? null);
 	}, [chatRecord?.status, store]);
+
+	useEffect(() => {
+		cancelDelayedStartupTimer();
+		store.setDelayedStartup(false);
+		if (!chatID) {
+			return;
+		}
+	}, [cancelDelayedStartupTimer, chatID, store]);
+
+	useEffect(() => {
+		const syncDelayedStartup = () => {
+			const snapshot = store.getSnapshot();
+			const shouldTrackDelayedStartup =
+				selectIsAwaitingFirstStreamChunk(snapshot) &&
+				snapshot.retryState === null &&
+				snapshot.streamError === null;
+
+			if (!shouldTrackDelayedStartup) {
+				cancelDelayedStartupTimer();
+				store.setDelayedStartup(false);
+				return;
+			}
+
+			if (delayedStartupTimerRef.current !== null || snapshot.delayedStartup) {
+				return;
+			}
+
+			cancelDelayedStartupTimer();
+			store.setDelayedStartup(false);
+			delayedStartupTimerRef.current = window.setTimeout(() => {
+				store.setDelayedStartup(true);
+				delayedStartupTimerRef.current = null;
+			}, RESPONSE_STARTUP_GRACE_MS);
+		};
+
+		syncDelayedStartup();
+		const unsubscribe = store.subscribe(syncDelayedStartup);
+
+		return () => {
+			unsubscribe();
+			cancelDelayedStartupTimer();
+			store.setDelayedStartup(false);
+		};
+	}, [cancelDelayedStartupTimer, store]);
 
 	useEffect(() => {
 		queuedMessagesHydratedChatIDRef.current = null;
@@ -931,15 +1036,4 @@ export const useChatStore = (
 			store.clearStreamError();
 		}, [store]),
 	};
-};
-
-export const useChatSelector = <T>(
-	store: ChatStore,
-	selector: (state: ChatStoreState) => T,
-): T => {
-	const getSnapshot = useCallback(
-		() => selector(store.getSnapshot()),
-		[selector, store],
-	);
-	return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
 };

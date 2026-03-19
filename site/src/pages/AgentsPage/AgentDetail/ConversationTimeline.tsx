@@ -618,6 +618,7 @@ export const StreamingOutput = memo<{
 	subagentStatusOverrides?: Map<string, TypesGen.ChatStatus>;
 	showInitialPlaceholder?: boolean;
 	retryState?: RetryState | null;
+	delayedStartup?: boolean;
 	urlTransform?: UrlTransform;
 }>(
 	({
@@ -627,6 +628,7 @@ export const StreamingOutput = memo<{
 		subagentStatusOverrides,
 		showInitialPlaceholder = false,
 		retryState,
+		delayedStartup = false,
 		urlTransform,
 	}) => {
 		const conversationItemProps = { role: "assistant" as const };
@@ -645,11 +647,15 @@ export const StreamingOutput = memo<{
 			(tool) => !renderedToolIDs.has(tool.id),
 		);
 		const showThinkingPlaceholder =
-			!retryState &&
-			(showInitialPlaceholder ||
-				(streamState &&
-					orderedBlocks.length === 0 &&
-					streamTools.length === 0));
+			showInitialPlaceholder ||
+			(streamState &&
+				orderedBlocks.length === 0 &&
+				streamTools.length === 0);
+		const showDelayedStartup =
+			showInitialPlaceholder && delayedStartup && !retryState;
+		const initialPlaceholderText = showDelayedStartup
+			? "Response startup is taking longer than expected"
+			: "Thinking...";
 
 		return (
 			<ConversationItem {...conversationItemProps}>
@@ -670,12 +676,25 @@ export const StreamingOutput = memo<{
 							{showThinkingPlaceholder ? (
 								<div className="relative">
 									<Response aria-hidden className="invisible">
-										Thinking...
+										{showDelayedStartup
+											? initialPlaceholderText
+											: `${initialPlaceholderText}${retryState ? ` attempt ${retryState.attempt}` : ""}`}
 									</Response>
 									<div className="pointer-events-none absolute inset-0 flex items-baseline gap-2">
-										<Shimmer as="div" className="text-[13px] leading-relaxed">
-											Thinking...
-										</Shimmer>
+										{showDelayedStartup ? (
+											<span className="text-[13px] leading-relaxed text-content-secondary">
+												{initialPlaceholderText}
+											</span>
+										) : (
+											<Shimmer as="div" className="text-[13px] leading-relaxed">
+												Thinking...
+											</Shimmer>
+										)}
+										{retryState && (
+											<span className="text-[11px] text-content-secondary">
+												attempt {retryState.attempt}
+											</span>
+										)}
 									</div>
 								</div>
 							) : null}
@@ -974,6 +993,7 @@ interface ConversationTimelineProps {
 	subagentTitles: Map<string, string>;
 	subagentStatusOverrides: Map<string, TypesGen.ChatStatus>;
 	retryState?: RetryState | null;
+	delayedStartup?: boolean;
 	isAwaitingFirstStreamChunk: boolean;
 	detailError?: ChatDetailError | null;
 	onOpenAnalytics?: () => void;
@@ -996,6 +1016,7 @@ export const ConversationTimeline: FC<ConversationTimelineProps> = ({
 	subagentTitles,
 	subagentStatusOverrides,
 	retryState,
+	delayedStartup = false,
 	isAwaitingFirstStreamChunk,
 	detailError,
 	onOpenAnalytics,
@@ -1063,6 +1084,7 @@ export const ConversationTimeline: FC<ConversationTimelineProps> = ({
 							subagentStatusOverrides={subagentStatusOverrides}
 							showInitialPlaceholder={isAwaitingFirstStreamChunk}
 							retryState={retryState}
+							delayedStartup={delayedStartup}
 							urlTransform={urlTransform}
 						/>
 					)}
@@ -1074,6 +1096,7 @@ export const ConversationTimeline: FC<ConversationTimelineProps> = ({
 							subagentStatusOverrides={subagentStatusOverrides}
 							showInitialPlaceholder={isAwaitingFirstStreamChunk}
 							retryState={retryState}
+							delayedStartup={delayedStartup}
 							urlTransform={urlTransform}
 						/>
 					)}

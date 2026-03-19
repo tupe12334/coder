@@ -286,6 +286,22 @@ describe("setRetryState / clearRetryState", () => {
 });
 
 // ---------------------------------------------------------------------------
+// setDelayedStartup
+// ---------------------------------------------------------------------------
+
+describe("setDelayedStartup", () => {
+	it("stores delayed startup state", () => {
+		const store = createChatStore();
+
+		store.setDelayedStartup(true);
+		expect(store.getSnapshot().delayedStartup).toBe(true);
+
+		store.setDelayedStartup(false);
+		expect(store.getSnapshot().delayedStartup).toBe(false);
+	});
+});
+
+// ---------------------------------------------------------------------------
 // setSubagentStatusOverride
 // ---------------------------------------------------------------------------
 
@@ -450,7 +466,7 @@ describe("applyMessagePart / applyMessageParts", () => {
 // ---------------------------------------------------------------------------
 
 describe("resetTransientState", () => {
-	it("clears streamState, streamError, retryState, and subagentOverrides", () => {
+	it("clears streamState, streamError, retryState, delayedStartup, and subagentOverrides", () => {
 		const store = createChatStore();
 		store.applyMessagePart({ type: "text", text: "stream" });
 		store.setStreamError({
@@ -465,6 +481,7 @@ describe("resetTransientState", () => {
 			delayMs: 5000,
 			retryingAt: "2025-01-01T00:01:00.000Z",
 		});
+		store.setDelayedStartup(true);
 		store.setSubagentStatusOverride("sub-1", "error");
 
 		store.resetTransientState();
@@ -473,6 +490,7 @@ describe("resetTransientState", () => {
 		expect(state.streamState).toBeNull();
 		expect(state.streamError).toBeNull();
 		expect(state.retryState).toBeNull();
+		expect(state.delayedStartup).toBe(false);
 		expect(state.subagentStatusOverrides.size).toBe(0);
 	});
 

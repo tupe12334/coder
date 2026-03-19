@@ -36,7 +36,10 @@ import { QueryClient, QueryClientProvider } from "react-query";
 import type { OneWayMessageEvent } from "utils/OneWayWebSocket";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
+	RESPONSE_STARTUP_GRACE_MS,
 	selectChatStatus,
+	selectDelayedStartup,
+	selectIsAwaitingFirstStreamChunk,
 	selectOrderedMessageIDs,
 	selectQueuedMessages,
 	selectRetryState,
@@ -224,6 +227,8 @@ const immediateAnimationFrame = (): void => {
 };
 
 afterEach(() => {
+	vi.clearAllTimers();
+	vi.useRealTimers();
 	vi.restoreAllMocks();
 	vi.mocked(watchChat).mockReset();
 });
@@ -1710,15 +1715,14 @@ describe("useChatStore", () => {
 			});
 		});
 
-		await waitFor(() => {
-			expect(result.current.retryState).toEqual({
-				attempt: 2,
-				error: "upstream timeout",
-				kind: "timeout",
-				provider: "anthropic",
-				delayMs: 5000,
-				retryingAt: "2025-01-01T00:01:00.000Z",
-			});
+		await act(async () => {});
+		expect(result.current.retryState).toEqual({
+			attempt: 2,
+			error: "upstream timeout",
+			kind: "timeout",
+			provider: "anthropic",
+			delayMs: 5000,
+			retryingAt: "2025-01-01T00:01:00.000Z",
 		});
 	});
 
@@ -1803,6 +1807,297 @@ describe("useChatStore", () => {
 			expect(result.current.chatStatus).toBe("running");
 		});
 		expect(result.current.retryState).toBeNull();
+	});
+
+	it("marks delayedStartup after the response startup grace period", async () => {
+		vi.useFakeTimers();
+		immediateAnimationFrame();
+
+		const chatID = "chat-delayed-startup";
+		const mockSocket = createMockSocket();
+		vi.mocked(watchChat).mockReturnValue(mockSocket as never);
+
+		const queryClient = createTestQueryClient();
+		const wrapper = ({ children }: PropsWithChildren) => (
+			<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+		);
+		const setChatErrorReason = vi.fn();
+		const clearChatErrorReason = vi.fn();
+
+		const { result } = renderHook(
+			() => {
+				const { store } = useChatStore({
+					chatID,
+					chatMessages: [],
+					chatRecord: makeChat(chatID),
+					chatMessagesData: {
+						messages: [],
+						queued_messages: [],
+						has_more: false,
+					},
+					chatQueuedMessages: [],
+					setChatErrorReason,
+					clearChatErrorReason,
+				});
+				return {
+					delayedStartup: useChatSelector(store, selectDelayedStartup),
+					isAwaitingFirstStreamChunk: useChatSelector(
+						store,
+						selectIsAwaitingFirstStreamChunk,
+					),
+				};
+			},
+			{ wrapper },
+		);
+
+		await act(async () => {});
+		expect(result.current.isAwaitingFirstStreamChunk).toBe(true);
+		expect(result.current.delayedStartup).toBe(false);
+
+		await act(async () => {
+			vi.advanceTimersByTime(RESPONSE_STARTUP_GRACE_MS - 1);
+		});
+		expect(result.current.delayedStartup).toBe(false);
+
+		await act(async () => {
+			vi.advanceTimersByTime(1);
+		});
+		expect(result.current.delayedStartup).toBe(true);
+	});
+
+	it("clears delayedStartup when the first stream chunk arrives", async () => {
+		vi.useFakeTimers();
+		immediateAnimationFrame();
+
+		const chatID = "chat-delayed-startup-first-chunk";
+		const mockSocket = createMockSocket();
+		vi.mocked(watchChat).mockReturnValue(mockSocket as never);
+
+		const queryClient = createTestQueryClient();
+		const wrapper = ({ children }: PropsWithChildren) => (
+			<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+		);
+		const setChatErrorReason = vi.fn();
+		const clearChatErrorReason = vi.fn();
+
+		const { result } = renderHook(
+			() => {
+				const { store } = useChatStore({
+					chatID,
+					chatMessages: [],
+					chatRecord: makeChat(chatID),
+					chatMessagesData: {
+						messages: [],
+						queued_messages: [],
+						has_more: false,
+					},
+					chatQueuedMessages: [],
+					setChatErrorReason,
+					clearChatErrorReason,
+				});
+				return {
+					delayedStartup: useChatSelector(store, selectDelayedStartup),
+					isAwaitingFirstStreamChunk: useChatSelector(
+						store,
+						selectIsAwaitingFirstStreamChunk,
+					),
+					streamState: useChatSelector(store, selectStreamState),
+				};
+			},
+			{ wrapper },
+		);
+
+		await act(async () => {});
+		expect(result.current.isAwaitingFirstStreamChunk).toBe(true);
+
+		await act(async () => {
+			vi.advanceTimersByTime(RESPONSE_STARTUP_GRACE_MS);
+		});
+		expect(result.current.delayedStartup).toBe(true);
+
+		act(() => {
+			mockSocket.emitData({
+				type: "message_part",
+				chat_id: chatID,
+				message_part: {
+					role: "assistant",
+					part: { type: "text", text: "hello" },
+				},
+			});
+		});
+
+		await act(async () => {});
+		expect(result.current.streamState?.blocks).toEqual([
+			{ type: "response", text: "hello" },
+		]);
+		expect(result.current.isAwaitingFirstStreamChunk).toBe(false);
+		expect(result.current.delayedStartup).toBe(false);
+
+		await act(async () => {
+			vi.advanceTimersByTime(RESPONSE_STARTUP_GRACE_MS);
+		});
+		expect(result.current.delayedStartup).toBe(false);
+	});
+
+	it("clears delayedStartup on retry and restarts the grace period", async () => {
+		vi.useFakeTimers();
+		immediateAnimationFrame();
+
+		const chatID = "chat-delayed-startup-retry";
+		const mockSocket = createMockSocket();
+		vi.mocked(watchChat).mockReturnValue(mockSocket as never);
+
+		const queryClient = createTestQueryClient();
+		const wrapper = ({ children }: PropsWithChildren) => (
+			<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+		);
+		const setChatErrorReason = vi.fn();
+		const clearChatErrorReason = vi.fn();
+
+		const { result } = renderHook(
+			() => {
+				const { store } = useChatStore({
+					chatID,
+					chatMessages: [],
+					chatRecord: makeChat(chatID),
+					chatMessagesData: {
+						messages: [],
+						queued_messages: [],
+						has_more: false,
+					},
+					chatQueuedMessages: [],
+					setChatErrorReason,
+					clearChatErrorReason,
+				});
+				return {
+					delayedStartup: useChatSelector(store, selectDelayedStartup),
+					isAwaitingFirstStreamChunk: useChatSelector(
+						store,
+						selectIsAwaitingFirstStreamChunk,
+					),
+					retryState: useChatSelector(store, selectRetryState),
+				};
+			},
+			{ wrapper },
+		);
+
+		await act(async () => {});
+		expect(result.current.isAwaitingFirstStreamChunk).toBe(true);
+
+		await act(async () => {
+			vi.advanceTimersByTime(RESPONSE_STARTUP_GRACE_MS);
+		});
+		expect(result.current.delayedStartup).toBe(true);
+
+		act(() => {
+			mockSocket.emitData({
+				type: "retry",
+				chat_id: chatID,
+				retry: {
+					attempt: 2,
+					error: "upstream timeout",
+					delay_ms: 5000,
+					retrying_at: "2025-01-01T00:01:00.000Z",
+				},
+			});
+		});
+
+		await act(async () => {});
+		expect(result.current.retryState).toEqual({
+			attempt: 2,
+			error: "upstream timeout",
+		});
+		expect(result.current.delayedStartup).toBe(false);
+
+		await act(async () => {
+			vi.advanceTimersByTime(RESPONSE_STARTUP_GRACE_MS);
+		});
+		expect(result.current.delayedStartup).toBe(false);
+
+		act(() => {
+			mockSocket.emitData({
+				type: "status",
+				chat_id: chatID,
+				status: { status: "running" },
+			});
+		});
+
+		await act(async () => {});
+		expect(result.current.retryState).toBeNull();
+		expect(result.current.isAwaitingFirstStreamChunk).toBe(true);
+
+		await act(async () => {
+			vi.advanceTimersByTime(RESPONSE_STARTUP_GRACE_MS);
+		});
+		expect(result.current.delayedStartup).toBe(true);
+	});
+
+	it("clears delayedStartup when switching chats and starts a new grace period", async () => {
+		vi.useFakeTimers();
+		immediateAnimationFrame();
+
+		const watchMock = vi.mocked(watchChat);
+		watchMock.mockImplementation(() => createMockSocket() as never);
+
+		const queryClient = createTestQueryClient();
+		const wrapper = ({ children }: PropsWithChildren) => (
+			<QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+		);
+		const setChatErrorReason = vi.fn();
+		const clearChatErrorReason = vi.fn();
+		const baseOptions = {
+			chatMessages: [] as TypesGen.ChatMessage[],
+			chatMessagesData: {
+				messages: [] as TypesGen.ChatMessage[],
+				queued_messages: [] as TypesGen.ChatQueuedMessage[],
+				has_more: false,
+			},
+			chatQueuedMessages: [] as TypesGen.ChatQueuedMessage[],
+			setChatErrorReason,
+			clearChatErrorReason,
+		};
+
+		const { result, rerender } = renderHook(
+			({ chatID }: { chatID: string }) => {
+				const { store } = useChatStore({
+					...baseOptions,
+					chatID,
+					chatRecord: makeChat(chatID),
+				});
+				return {
+					delayedStartup: useChatSelector(store, selectDelayedStartup),
+					isAwaitingFirstStreamChunk: useChatSelector(
+						store,
+						selectIsAwaitingFirstStreamChunk,
+					),
+				};
+			},
+			{ initialProps: { chatID: "chat-delayed-startup-a" }, wrapper },
+		);
+
+		await act(async () => {});
+		expect(result.current.isAwaitingFirstStreamChunk).toBe(true);
+
+		await act(async () => {
+			vi.advanceTimersByTime(RESPONSE_STARTUP_GRACE_MS);
+		});
+		expect(result.current.delayedStartup).toBe(true);
+
+		rerender({ chatID: "chat-delayed-startup-b" });
+
+		await act(async () => {});
+		expect(result.current.delayedStartup).toBe(false);
+		expect(result.current.isAwaitingFirstStreamChunk).toBe(true);
+
+		await act(async () => {
+			vi.advanceTimersByTime(RESPONSE_STARTUP_GRACE_MS - 1);
+		});
+		expect(result.current.delayedStartup).toBe(false);
+
+		await act(async () => {
+			vi.advanceTimersByTime(1);
+		});
+		expect(result.current.delayedStartup).toBe(true);
 	});
 
 	it("routes status events for other chatIDs to subagent overrides", async () => {

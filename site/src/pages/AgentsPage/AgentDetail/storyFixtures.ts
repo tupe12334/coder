@@ -29,12 +29,6 @@ export const buildLiveStatus = (
 		...overrides,
 	});
 
-const toStreamPartRecord = (
-	part: TypesGen.ChatMessagePart,
-): Record<string, unknown> => ({
-	...part,
-});
-
 export const buildStreamRenderState = (
 	parts: readonly TypesGen.ChatMessagePart[],
 ): StoryStreamRenderState => {

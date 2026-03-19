@@ -15,7 +15,7 @@ import {
 	scheduleToAutostart,
 } from "pages/WorkspaceSettingsPage/WorkspaceSchedulePage/schedule";
 import { ttlMsToAutostop } from "pages/WorkspaceSettingsPage/WorkspaceSchedulePage/ttl";
-import { useWorkspaceSettings } from "pages/WorkspaceSettingsPage/WorkspaceSettingsLayout";
+import { useWorkspaceSettings } from "pages/WorkspaceSettingsPage/WorkspaceSettingsContext";
 import { type FC, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "react-query";
 import { useNavigate, useParams } from "react-router";

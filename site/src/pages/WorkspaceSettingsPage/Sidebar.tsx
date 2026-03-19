@@ -11,7 +11,7 @@ import {
 	TimerIcon as ScheduleIcon,
 	Users as SharingIcon,
 } from "lucide-react";
-import { useWorkspaceSettings } from "./WorkspaceSettingsLayout";
+import { useWorkspaceSettings } from "./WorkspaceSettingsContext";
 
 export const Sidebar: React.FC = () => {
 	const { owner, workspace, permissions } = useWorkspaceSettings();

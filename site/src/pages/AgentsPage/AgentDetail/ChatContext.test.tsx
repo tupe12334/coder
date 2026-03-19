@@ -48,6 +48,7 @@ import {
 	selectSubagentStatusOverrides,
 	useChatSelector,
 	useChatStore,
+	useDelayedStartupTracker,
 } from "./ChatContext";
 
 vi.mock("api/api", () => ({
@@ -1839,6 +1840,7 @@ describe("useChatStore", () => {
 					setChatErrorReason,
 					clearChatErrorReason,
 				});
+				useDelayedStartupTracker({ chatID, store });
 				return {
 					delayedStartup: useChatSelector(store, selectDelayedStartup),
 					isAwaitingFirstStreamChunk: useChatSelector(
@@ -1895,6 +1897,7 @@ describe("useChatStore", () => {
 					setChatErrorReason,
 					clearChatErrorReason,
 				});
+				useDelayedStartupTracker({ chatID, store });
 				return {
 					delayedStartup: useChatSelector(store, selectDelayedStartup),
 					isAwaitingFirstStreamChunk: useChatSelector(
@@ -1969,6 +1972,7 @@ describe("useChatStore", () => {
 					setChatErrorReason,
 					clearChatErrorReason,
 				});
+				useDelayedStartupTracker({ chatID, store });
 				return {
 					delayedStartup: useChatSelector(store, selectDelayedStartup),
 					isAwaitingFirstStreamChunk: useChatSelector(
@@ -2064,6 +2068,7 @@ describe("useChatStore", () => {
 					chatID,
 					chatRecord: makeChat(chatID),
 				});
+				useDelayedStartupTracker({ chatID, store });
 				return {
 					delayedStartup: useChatSelector(store, selectDelayedStartup),
 					isAwaitingFirstStreamChunk: useChatSelector(

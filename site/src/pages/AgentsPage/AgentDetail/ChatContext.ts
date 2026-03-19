@@ -551,6 +551,11 @@ export const selectIsAwaitingFirstStreamChunk = (
 	);
 };
 
+const selectShouldTrackDelayedStartup = (state: ChatStoreState): boolean =>
+	selectIsAwaitingFirstStreamChunk(state) &&
+	state.retryState === null &&
+	state.streamError === null;
+
 export const useChatSelector = <T>(
 	store: ChatStore,
 	selector: (state: ChatStoreState) => T,
@@ -560,6 +565,50 @@ export const useChatSelector = <T>(
 		[selector, store],
 	);
 	return useSyncExternalStore(store.subscribe, getSnapshot, getSnapshot);
+};
+
+type UseDelayedStartupTrackerOptions = {
+	chatID: string | undefined;
+	store: ChatStore;
+};
+
+export const useDelayedStartupTracker = ({
+	chatID,
+	store,
+}: UseDelayedStartupTrackerOptions): void => {
+	const delayedStartupTimerRef = useRef<number | null>(null);
+	const shouldTrackDelayedStartup = useChatSelector(
+		store,
+		selectShouldTrackDelayedStartup,
+	);
+
+	const cancelDelayedStartupTimer = useCallback(() => {
+		if (delayedStartupTimerRef.current === null) {
+			return;
+		}
+		window.clearTimeout(delayedStartupTimerRef.current);
+		delayedStartupTimerRef.current = null;
+	}, []);
+
+	useEffect(() => {
+		if (!chatID || !shouldTrackDelayedStartup) {
+			return;
+		}
+
+		// Keep the browser timer scoped to the active chat so delayed-startup
+		// state is cleared during navigation and when stream state changes.
+		cancelDelayedStartupTimer();
+		store.setDelayedStartup(false);
+		delayedStartupTimerRef.current = window.setTimeout(() => {
+			store.setDelayedStartup(true);
+			delayedStartupTimerRef.current = null;
+		}, RESPONSE_STARTUP_GRACE_MS);
+
+		return () => {
+			cancelDelayedStartupTimer();
+			store.setDelayedStartup(false);
+		};
+	}, [cancelDelayedStartupTimer, chatID, shouldTrackDelayedStartup, store]);
 };
 
 export const useChatStore = (
@@ -578,7 +627,6 @@ export const useChatStore = (
 	const queryClient = useQueryClient();
 	const storeRef = useRef<ChatStore>(createChatStore());
 	const streamResetFrameRef = useRef<number | null>(null);
-	const delayedStartupTimerRef = useRef<number | null>(null);
 	const queuedMessagesHydratedChatIDRef = useRef<string | null>(null);
 	// Tracks whether the WebSocket has delivered a queue_update for the
 	// current chat. When true, the stream is the authoritative source
@@ -636,14 +684,6 @@ export const useChatStore = (
 		}
 		window.cancelAnimationFrame(streamResetFrameRef.current);
 		streamResetFrameRef.current = null;
-	}, []);
-
-	const cancelDelayedStartupTimer = useCallback(() => {
-		if (delayedStartupTimerRef.current === null) {
-			return;
-		}
-		window.clearTimeout(delayedStartupTimerRef.current);
-		delayedStartupTimerRef.current = null;
 	}, []);
 
 	const scheduleStreamReset = useCallback(() => {
@@ -722,50 +762,6 @@ export const useChatStore = (
 	useEffect(() => {
 		store.setChatStatus(chatRecord?.status ?? null);
 	}, [chatRecord?.status, store]);
-
-	useEffect(() => {
-		cancelDelayedStartupTimer();
-		store.setDelayedStartup(false);
-		if (!chatID) {
-			return;
-		}
-	}, [cancelDelayedStartupTimer, chatID, store]);
-
-	useEffect(() => {
-		const syncDelayedStartup = () => {
-			const snapshot = store.getSnapshot();
-			const shouldTrackDelayedStartup =
-				selectIsAwaitingFirstStreamChunk(snapshot) &&
-				snapshot.retryState === null &&
-				snapshot.streamError === null;
-
-			if (!shouldTrackDelayedStartup) {
-				cancelDelayedStartupTimer();
-				store.setDelayedStartup(false);
-				return;
-			}
-
-			if (delayedStartupTimerRef.current !== null || snapshot.delayedStartup) {
-				return;
-			}
-
-			cancelDelayedStartupTimer();
-			store.setDelayedStartup(false);
-			delayedStartupTimerRef.current = window.setTimeout(() => {
-				store.setDelayedStartup(true);
-				delayedStartupTimerRef.current = null;
-			}, RESPONSE_STARTUP_GRACE_MS);
-		};
-
-		syncDelayedStartup();
-		const unsubscribe = store.subscribe(syncDelayedStartup);
-
-		return () => {
-			unsubscribe();
-			cancelDelayedStartupTimer();
-			store.setDelayedStartup(false);
-		};
-	}, [cancelDelayedStartupTimer, store]);
 
 	useEffect(() => {
 		queuedMessagesHydratedChatIDRef.current = null;

@@ -648,9 +648,7 @@ export const StreamingOutput = memo<{
 		);
 		const showThinkingPlaceholder =
 			showInitialPlaceholder ||
-			(streamState &&
-				orderedBlocks.length === 0 &&
-				streamTools.length === 0);
+			(streamState && orderedBlocks.length === 0 && streamTools.length === 0);
 		const showDelayedStartup =
 			showInitialPlaceholder && delayedStartup && !retryState;
 		const initialPlaceholderText = showDelayedStartup

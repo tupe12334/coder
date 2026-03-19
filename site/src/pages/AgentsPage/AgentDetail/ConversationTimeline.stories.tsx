@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type * as TypesGen from "api/typesGenerated";
-import { type FC, useEffect, useMemo, useState } from "react";
 import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { ConversationTimeline } from "./ConversationTimeline";
 import { parseMessagesWithMergedTools } from "./messageParsing";
@@ -80,34 +79,7 @@ const retryThenResumeMessages = buildMessages([
 	},
 ]);
 
-const RetryThenResumedStreamingStory: FC = () => {
-	const resumedStream = useMemo(
-		() => buildStreamRenderState(resumedStreamParts),
-		[],
-	);
-	const [retryState, setRetryState] = useState<RetryState | null>(
-		buildRetryState({
-			attempt: 3,
-			error: "Anthropic is still overloaded, retrying one more time.",
-			kind: "overloaded",
-			delayMs: 4000,
-		}),
-	);
-
-	useEffect(() => {
-		setRetryState(null);
-	}, []);
-
-	return (
-		<ConversationTimeline
-			{...defaultArgs}
-			parsedMessages={retryThenResumeMessages}
-			hasStreamOutput
-			{...(retryState ? { streamState: null, streamTools: [] } : resumedStream)}
-			retryState={retryState}
-		/>
-	);
-};
+const retryThenResumedStream = buildStreamRenderState(resumedStreamParts);
 
 const meta: Meta<typeof ConversationTimeline> = {
 	title: "pages/AgentsPage/AgentDetail/ConversationTimeline",
@@ -606,7 +578,13 @@ export const DelayedFirstChunk: Story = {
 
 /** Once streaming resumes, the retry callout disappears and content remains. */
 export const RetryThenResumedStreaming: Story = {
-	render: () => <RetryThenResumedStreamingStory />,
+	args: {
+		...defaultArgs,
+		parsedMessages: retryThenResumeMessages,
+		hasStreamOutput: true,
+		...retryThenResumedStream,
+		retryState: null,
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await waitFor(() => {

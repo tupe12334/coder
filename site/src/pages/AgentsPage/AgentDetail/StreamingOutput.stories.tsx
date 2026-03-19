@@ -1,6 +1,5 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type * as TypesGen from "api/typesGenerated";
-import { type FC, useEffect, useMemo, useState } from "react";
 import { expect, waitFor, within } from "storybook/test";
 import { StreamingOutput } from "./ConversationTimeline";
 import { applyMessagePartToStreamState, buildStreamTools } from "./streamState";
@@ -45,39 +44,6 @@ const resumedParts: TypesGen.ChatMessagePart[] = [
 		text: "Successfully connected after retry. Here is your answer...",
 	},
 ];
-
-const stalePartialParts: TypesGen.ChatMessagePart[] = [
-	{
-		type: "text",
-		text: "This partial answer should disappear before retrying.",
-	},
-];
-
-const RetryAfterPartialStreamStory: FC = () => {
-	const [retryState, setRetryState] = useState<RetryState | null>(null);
-	const initialStream = useMemo(
-		() => buildStreamRenderState(stalePartialParts),
-		[],
-	);
-
-	useEffect(() => {
-		setRetryState(
-			buildRetryState({
-				attempt: 2,
-				error: "The provider dropped the connection. Retrying now.",
-			}),
-		);
-	}, []);
-
-	return (
-		<StreamingOutput
-			{...(retryState
-				? { streamState: null, streamTools: [], retryState }
-				: initialStream)}
-			showInitialPlaceholder
-		/>
-	);
-};
 
 const meta: Meta<typeof StreamingOutput> = {
 	title: "pages/AgentsPage/AgentDetail/StreamingOutput",
@@ -156,7 +122,15 @@ export const RetryRateLimited: Story = {
 
 /** Retrying clears stale streamed content before rendering the callout. */
 export const RetryAfterPartialStream: Story = {
-	render: () => <RetryAfterPartialStreamStory />,
+	args: {
+		streamState: null,
+		streamTools: [],
+		showInitialPlaceholder: true,
+		retryState: buildRetryState({
+			attempt: 2,
+			error: "The provider dropped the connection. Retrying now.",
+		}),
+	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await waitFor(() => {

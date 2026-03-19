@@ -44,7 +44,10 @@ import { isMobileViewport } from "utils/mobile";
 import { pageTitle } from "utils/page";
 import { portForwardURL } from "utils/portForward";
 import type { ChatMessageInputRef } from "./AgentChatInput";
-import { useChatStore } from "./AgentDetail/ChatContext";
+import {
+	useChatStore,
+	useDelayedStartupTracker,
+} from "./AgentDetail/ChatContext";
 import { getParentChatID, getWorkspaceAgent } from "./AgentDetail/chatHelpers";
 import { useWorkspaceCreationWatcher } from "./AgentDetail/useWorkspaceCreationWatcher";
 import {
@@ -444,6 +447,8 @@ const AgentDetail: FC = () => {
 		setChatErrorReason,
 		clearChatErrorReason,
 	});
+
+	useDelayedStartupTracker({ chatID: agentId, store });
 
 	// Git watcher: runs regardless of sidebar visibility, but only
 	// connects when the workspace agent is in the "connected" state

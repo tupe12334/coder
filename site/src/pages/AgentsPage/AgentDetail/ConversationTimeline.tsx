@@ -88,6 +88,7 @@ type RenderBlockListParams = {
 	toolByID: ReadonlyMap<string, MergedTool>;
 	keyPrefix: string;
 	isStreaming?: boolean;
+	bypassSmoothing?: boolean;
 	subagentTitles?: Map<string, string>;
 	subagentStatusOverrides?: Map<string, TypesGen.ChatStatus>;
 	onImageClick?: (src: string) => void;
@@ -100,12 +101,13 @@ type RenderBlockListParams = {
 const SmoothedResponse: FC<{
 	text: string;
 	streamKey: string;
+	bypassSmoothing?: boolean;
 	urlTransform?: UrlTransform;
-}> = ({ text, streamKey, urlTransform }) => {
+}> = ({ text, streamKey, bypassSmoothing = false, urlTransform }) => {
 	const { visibleText } = useSmoothStreamingText({
 		fullText: text,
 		isStreaming: true,
-		bypassSmoothing: false,
+		bypassSmoothing,
 		streamKey,
 	});
 	return <Response urlTransform={urlTransform}>{visibleText}</Response>;
@@ -121,6 +123,7 @@ function renderBlockList({
 	toolByID,
 	keyPrefix,
 	isStreaming = false,
+	bypassSmoothing = false,
 	subagentTitles,
 	subagentStatusOverrides,
 	onImageClick,
@@ -136,6 +139,7 @@ function renderBlockList({
 							key={`${keyPrefix}-response-${index}`}
 							text={block.text}
 							streamKey={keyPrefix}
+							bypassSmoothing={bypassSmoothing}
 							urlTransform={urlTransform}
 						/>
 					) : (
@@ -152,7 +156,7 @@ function renderBlockList({
 							key={`${keyPrefix}-thinking-${index}`}
 							id={`${keyPrefix}-thinking-${index}`}
 							text={block.text}
-							isStreaming={isStreaming}
+							isStreaming={isStreaming && !bypassSmoothing}
 							urlTransform={urlTransform}
 						/>
 					);
@@ -500,6 +504,7 @@ export const StreamingOutput = memo<{
 	showInitialPlaceholder?: boolean;
 	retryState?: { attempt: number; error: string } | null;
 	urlTransform?: UrlTransform;
+	bypassSmoothing?: boolean;
 }>(
 	({
 		streamState,
@@ -509,6 +514,7 @@ export const StreamingOutput = memo<{
 		showInitialPlaceholder = false,
 		retryState,
 		urlTransform,
+		bypassSmoothing,
 	}) => {
 		const conversationItemProps = { role: "assistant" as const };
 		const toolByID = new Map(streamTools.map((tool) => [tool.id, tool]));
@@ -518,6 +524,7 @@ export const StreamingOutput = memo<{
 			toolByID,
 			keyPrefix: "stream",
 			isStreaming: true,
+			bypassSmoothing,
 			subagentTitles,
 			subagentStatusOverrides,
 			urlTransform,
@@ -858,6 +865,7 @@ interface ConversationTimelineProps {
 	editingMessageId?: number | null;
 	savingMessageId?: number | null;
 	urlTransform?: UrlTransform;
+	bypassSmoothing?: boolean;
 }
 
 export const ConversationTimeline: FC<ConversationTimelineProps> = ({
@@ -876,6 +884,7 @@ export const ConversationTimeline: FC<ConversationTimelineProps> = ({
 	editingMessageId,
 	savingMessageId,
 	urlTransform,
+	bypassSmoothing,
 }) => {
 	const shouldRenderStreamAfterMessages =
 		hasStreamOutput && parsedMessages.length > 0;
@@ -937,6 +946,7 @@ export const ConversationTimeline: FC<ConversationTimelineProps> = ({
 							showInitialPlaceholder={isAwaitingFirstStreamChunk}
 							retryState={retryState}
 							urlTransform={urlTransform}
+							bypassSmoothing={bypassSmoothing}
 						/>
 					)}
 					{hasStreamOutput && parsedMessages.length === 0 && (
@@ -948,6 +958,7 @@ export const ConversationTimeline: FC<ConversationTimelineProps> = ({
 							showInitialPlaceholder={isAwaitingFirstStreamChunk}
 							retryState={retryState}
 							urlTransform={urlTransform}
+							bypassSmoothing={bypassSmoothing}
 						/>
 					)}
 				</div>

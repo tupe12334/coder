@@ -1,6 +1,11 @@
 import { watchChat } from "api/api";
 import { chatMessagesKey, updateInfiniteChatsCache } from "api/queries/chats";
 import type * as TypesGen from "api/typesGenerated";
+import {
+	asNumber,
+	asRecord,
+	asString,
+} from "components/ai-elements/runtimeTypeUtils";
 
 import {
 	startTransition,
@@ -14,7 +19,7 @@ import type { OneWayMessageEvent } from "utils/OneWayWebSocket";
 import { createReconnectingWebSocket } from "utils/reconnectingWebSocket";
 import type { ChatDetailError } from "../usageLimitMessage";
 import { applyMessagePartToStreamState } from "./streamState";
-import type { StreamState } from "./types";
+import type { RetryState, StreamState } from "./types";
 
 const isChatStreamEvent = (data: unknown): data is TypesGen.ChatStreamEvent =>
 	typeof data === "object" &&
@@ -35,6 +40,40 @@ const toChatStreamEvents = (data: unknown): TypesGen.ChatStreamEvent[] => {
 		return data;
 	}
 	return [];
+};
+
+const normalizeErrorKind = (value: unknown): string => {
+	const kind = asString(value).trim();
+	return kind || "generic";
+};
+
+const normalizeProvider = (value: unknown): string | undefined => {
+	const provider = asString(value).trim();
+	return provider || undefined;
+};
+
+const normalizeChatDetailError = (
+	error: TypesGen.ChatStreamError | Record<string, unknown> | undefined,
+): ChatDetailError => ({
+	message: asString(error?.message).trim() || "Chat processing failed.",
+	kind: normalizeErrorKind(error?.kind),
+	provider: normalizeProvider(error?.provider),
+	retryable:
+		typeof error?.retryable === "boolean" ? error.retryable : undefined,
+	statusCode: asNumber(error?.status_code),
+});
+
+const normalizeRetryState = (retry: TypesGen.ChatStreamRetry): RetryState => {
+	const delayMs = asNumber(retry.delay_ms);
+	const retryingAt = asString(retry.retrying_at).trim() || undefined;
+	return {
+		attempt: Math.max(1, asNumber(retry.attempt) ?? 1),
+		error: asString(retry.error).trim() || "Retrying request shortly.",
+		kind: normalizeErrorKind(retry.kind),
+		provider: normalizeProvider(retry.provider),
+		...(delayMs !== undefined ? { delayMs } : {}),
+		...(retryingAt ? { retryingAt } : {}),
+	};
 };
 
 const byMessageCreatedAt = (
@@ -121,13 +160,52 @@ const chatQueuedMessagesEqualByID = (
 	return true;
 };
 
+const chatDetailErrorsEqual = (
+	left: ChatDetailError | null,
+	right: ChatDetailError | null,
+): boolean => {
+	if (left === right) {
+		return true;
+	}
+	if (!left || !right) {
+		return false;
+	}
+	return (
+		left.kind === right.kind &&
+		left.message === right.message &&
+		left.provider === right.provider &&
+		left.retryable === right.retryable &&
+		left.statusCode === right.statusCode
+	);
+};
+
+const retryStatesEqual = (
+	left: RetryState | null,
+	right: RetryState | null,
+): boolean => {
+	if (left === right) {
+		return true;
+	}
+	if (!left || !right) {
+		return false;
+	}
+	return (
+		left.attempt === right.attempt &&
+		left.error === right.error &&
+		left.kind === right.kind &&
+		left.provider === right.provider &&
+		left.delayMs === right.delayMs &&
+		left.retryingAt === right.retryingAt
+	);
+};
+
 type ChatStoreState = {
 	messagesByID: Map<number, TypesGen.ChatMessage>;
 	orderedMessageIDs: readonly number[];
 	streamState: StreamState | null;
 	chatStatus: TypesGen.ChatStatus | null;
-	streamError: string | null;
-	retryState: { attempt: number; error: string } | null;
+	streamError: ChatDetailError | null;
+	retryState: RetryState | null;
 	queuedMessages: readonly TypesGen.ChatQueuedMessage[];
 	subagentStatusOverrides: Map<string, TypesGen.ChatStatus>;
 };
@@ -148,9 +226,9 @@ type ChatStore = {
 		queuedMessages: readonly TypesGen.ChatQueuedMessage[] | undefined,
 	) => void;
 	setChatStatus: (status: TypesGen.ChatStatus | null) => void;
-	setStreamError: (reason: string | null) => void;
+	setStreamError: (reason: ChatDetailError | null) => void;
 	clearStreamError: () => void;
-	setRetryState: (state: { attempt: number; error: string } | null) => void;
+	setRetryState: (state: RetryState | null) => void;
 	clearRetryState: () => void;
 	clearStreamState: () => void;
 	setSubagentStatusOverride: (
@@ -321,13 +399,18 @@ export const createChatStore = (): ChatStore => {
 			}));
 		},
 		setStreamError: (reason) => {
-			if (state.streamError === reason) {
+			if (chatDetailErrorsEqual(state.streamError, reason)) {
 				return;
 			}
-			setState((current) => ({
-				...current,
-				streamError: reason,
-			}));
+			setState((current) => {
+				if (chatDetailErrorsEqual(current.streamError, reason)) {
+					return current;
+				}
+				return {
+					...current,
+					streamError: reason,
+				};
+			});
 		},
 		clearStreamError: () => {
 			if (state.streamError === null) {
@@ -339,13 +422,18 @@ export const createChatStore = (): ChatStore => {
 			}));
 		},
 		setRetryState: (retryState) => {
-			if (state.retryState === retryState) {
+			if (retryStatesEqual(state.retryState, retryState)) {
 				return;
 			}
-			setState((current) => ({
-				...current,
-				retryState,
-			}));
+			setState((current) => {
+				if (retryStatesEqual(current.retryState, retryState)) {
+					return current;
+				}
+				return {
+					...current,
+					retryState,
+				};
+			});
 		},
 		clearRetryState: () => {
 			if (state.retryState === null) {
@@ -624,7 +712,10 @@ export const useChatStore = (
 				return;
 			}
 			if (payload.parseError || !payload.parsedMessage) {
-				store.setStreamError("Failed to parse chat stream update.");
+				store.setStreamError({
+					kind: "generic",
+					message: "Failed to parse chat stream update.",
+				});
 				return;
 			}
 			if (payload.parsedMessage.type !== "data") {
@@ -751,15 +842,11 @@ export const useChatStore = (
 						if (streamEvent.chat_id && streamEvent.chat_id !== chatID) {
 							continue;
 						}
-						const reason =
-							streamEvent.error?.message.trim() || "Chat processing failed.";
+						const reason = normalizeChatDetailError(streamEvent.error);
 						store.setChatStatus("error");
 						store.setStreamError(reason);
 						store.clearRetryState();
-						setChatErrorReason(chatID, {
-							kind: "generic",
-							message: reason,
-						});
+						setChatErrorReason(chatID, reason);
 						updateSidebarChat((chat) => ({
 							...chat,
 							status: "error",
@@ -773,10 +860,7 @@ export const useChatStore = (
 						const retry = streamEvent.retry;
 						if (retry) {
 							store.clearStreamState();
-							store.setRetryState({
-								attempt: retry.attempt,
-								error: retry.error,
-							});
+							store.setRetryState(normalizeRetryState(retry));
 						}
 						continue;
 					}
@@ -808,7 +892,10 @@ export const useChatStore = (
 				// Show the error only on the first disconnect (not
 				// while we are already retrying).
 				if (attempt === 0) {
-					store.setStreamError("Chat stream disconnected. Reconnecting\u2026");
+					store.setStreamError({
+						kind: "generic",
+						message: "Chat stream disconnected. Reconnecting\u2026",
+					});
 				}
 				// Clear "running" status on disconnect so the UI
 				// doesn't show a stale spinner. The reconnected

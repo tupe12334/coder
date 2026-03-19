@@ -95,9 +95,8 @@ export const AgentDetailTimeline: FC<AgentDetailTimelineProps> = ({
 		(persistedErrorReason?.kind === "usage-limit" || chatStatus === "error"
 			? persistedErrorReason
 			: undefined) ??
-		(streamError
-			? { kind: "generic" as const, message: streamError }
-			: undefined);
+		streamError ??
+		undefined;
 	const latestMessage = messages[messages.length - 1];
 	const latestMessageNeedsAssistantResponse =
 		!latestMessage || latestMessage.role !== "assistant";

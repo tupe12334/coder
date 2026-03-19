@@ -1,8 +1,11 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type * as TypesGen from "api/typesGenerated";
-import { expect, fn, userEvent, within } from "storybook/test";
+import { type FC, useEffect, useMemo, useState } from "react";
+import { expect, fn, userEvent, waitFor, within } from "storybook/test";
 import { ConversationTimeline } from "./ConversationTimeline";
 import { parseMessagesWithMergedTools } from "./messageParsing";
+import { applyMessagePartToStreamState, buildStreamTools } from "./streamState";
+import type { RetryState, StreamState } from "./types";
 
 // 1×1 solid coral (#FF6B6B) PNG encoded as base64.
 const TEST_PNG_B64 =
@@ -27,6 +30,83 @@ const defaultArgs: Omit<
 	subagentTitles: new Map(),
 	subagentStatusOverrides: new Map(),
 	isAwaitingFirstStreamChunk: false,
+};
+
+const buildStreamRenderState = (
+	parts: readonly TypesGen.ChatMessagePart[],
+): Pick<
+	React.ComponentProps<typeof ConversationTimeline>,
+	"streamState" | "streamTools"
+> => {
+	let streamState: StreamState | null = null;
+	for (const part of parts) {
+		streamState = applyMessagePartToStreamState(
+			streamState,
+			part as unknown as Record<string, unknown>,
+		);
+	}
+	return {
+		streamState,
+		streamTools: buildStreamTools(streamState),
+	};
+};
+
+const buildRetryState = (overrides: Partial<RetryState> = {}): RetryState => ({
+	attempt: 2,
+	error:
+		"Anthropic is retrying your request after a transient upstream failure.",
+	kind: "generic",
+	provider: "anthropic",
+	delayMs: 2000,
+	retryingAt: "2026-03-10T00:00:02.000Z",
+	...overrides,
+});
+
+const resumedStreamParts: TypesGen.ChatMessagePart[] = [
+	{
+		type: "text",
+		text: "Connected after retry. Here is the final streamed answer.",
+	},
+];
+
+const retryThenResumeMessages = buildMessages([
+	{
+		...baseMessage,
+		id: 1,
+		role: "user",
+		content: [
+			{ type: "text", text: "Please try again if the provider flakes." },
+		],
+	},
+]);
+
+const RetryThenResumedStreamingStory: FC = () => {
+	const resumedStream = useMemo(
+		() => buildStreamRenderState(resumedStreamParts),
+		[],
+	);
+	const [retryState, setRetryState] = useState<RetryState | null>(
+		buildRetryState({
+			attempt: 3,
+			error: "Anthropic is still overloaded, retrying one more time.",
+			kind: "overloaded",
+			delayMs: 4000,
+		}),
+	);
+
+	useEffect(() => {
+		setRetryState(null);
+	}, []);
+
+	return (
+		<ConversationTimeline
+			{...defaultArgs}
+			parsedMessages={retryThenResumeMessages}
+			hasStreamOutput
+			{...(retryState ? { streamState: null, streamTools: [] } : resumedStream)}
+			retryState={retryState}
+		/>
+	);
 };
 
 const meta: Meta<typeof ConversationTimeline> = {
@@ -432,5 +512,112 @@ export const StickyUserMessageStructure: Story = {
 		const canvas = within(canvasElement);
 		expect(canvas.getByText("First prompt")).toBeVisible();
 		expect(canvas.getByText("Second prompt")).toBeVisible();
+	},
+};
+
+/** Retry errors render the shared mux-style callout with reason text. */
+export const RetryWithReason: Story = {
+	args: {
+		...defaultArgs,
+		parsedMessages: [],
+		hasStreamOutput: true,
+		isAwaitingFirstStreamChunk: true,
+		retryState: buildRetryState(),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(
+			canvas.getByRole("heading", { name: /retrying request/i }),
+		).toBeVisible();
+		expect(canvas.getByText(/transient upstream failure/i)).toBeVisible();
+		expect(canvas.getByText("generic")).toBeVisible();
+		expect(canvas.getByText(/attempt 2/i)).toBeVisible();
+	},
+};
+
+/** Overloaded terminal errors expose provider metadata and status links. */
+export const TerminalOverloadedError: Story = {
+	args: {
+		...defaultArgs,
+		parsedMessages: [],
+		detailError: {
+			kind: "overloaded",
+			message: "Anthropic is currently overloaded. Please try again shortly.",
+			provider: "anthropic",
+			retryable: true,
+			statusCode: 529,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(
+			canvas.getByRole("heading", { name: /service overloaded/i }),
+		).toBeVisible();
+		expect(canvas.getByText("overloaded")).toBeVisible();
+		expect(canvas.getByText(/http 529/i)).toBeVisible();
+		expect(canvas.getByRole("link", { name: /status/i })).toBeVisible();
+	},
+};
+
+/** Generic terminal errors keep the shared layout without usage/status CTAs. */
+export const TerminalGenericError: Story = {
+	args: {
+		...defaultArgs,
+		parsedMessages: [],
+		detailError: {
+			kind: "generic",
+			message: "Provider request failed.",
+			provider: "openai",
+			statusCode: 500,
+		},
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(
+			canvas.getByRole("heading", { name: /request failed/i }),
+		).toBeVisible();
+		expect(canvas.getByText("generic")).toBeVisible();
+		expect(canvas.getByText(/provider request failed/i)).toBeVisible();
+		expect(
+			canvas.queryByRole("link", { name: /status/i }),
+		).not.toBeInTheDocument();
+		expect(
+			canvas.queryByRole("button", { name: /view usage/i }),
+		).not.toBeInTheDocument();
+	},
+};
+
+/** When the first chunk is delayed, the timeline keeps the thinking placeholder. */
+export const DelayedFirstChunk: Story = {
+	args: {
+		...defaultArgs,
+		parsedMessages: retryThenResumeMessages,
+		hasStreamOutput: true,
+		isAwaitingFirstStreamChunk: true,
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(canvas.getByText("Thinking...")).toBeVisible();
+		expect(
+			canvas.queryByRole("heading", { name: /retrying request/i }),
+		).not.toBeInTheDocument();
+	},
+};
+
+/** Once streaming resumes, the retry callout disappears and content remains. */
+export const RetryThenResumedStreaming: Story = {
+	render: () => <RetryThenResumedStreamingStory />,
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		await waitFor(() => {
+			expect(
+				canvas.getByText(
+					/connected after retry\. here is the final streamed answer\./i,
+				),
+			).toBeVisible();
+		});
+		expect(
+			canvas.queryByRole("heading", { name: /service overloaded/i }),
+		).not.toBeInTheDocument();
 	},
 };

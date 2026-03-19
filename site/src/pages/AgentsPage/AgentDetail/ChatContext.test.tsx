@@ -1569,18 +1569,33 @@ describe("useChatStore", () => {
 			mockSocket.emitData({
 				type: "error",
 				chat_id: chatID,
-				error: { message: "Rate limit exceeded" },
+				error: {
+					message: "Rate limit exceeded",
+					kind: "rate_limit",
+					provider: "anthropic",
+					retryable: true,
+					status_code: 429,
+				},
 			});
 		});
 
 		await waitFor(() => {
 			expect(result.current.chatStatus).toBe("error");
 		});
-		expect(result.current.streamError).toBe("Rate limit exceeded");
+		expect(result.current.streamError).toEqual({
+			kind: "rate_limit",
+			message: "Rate limit exceeded",
+			provider: "anthropic",
+			retryable: true,
+			statusCode: 429,
+		});
 		expect(result.current.retryState).toBeNull();
 		expect(setChatErrorReason).toHaveBeenCalledWith(chatID, {
-			kind: "generic",
+			kind: "rate_limit",
 			message: "Rate limit exceeded",
+			provider: "anthropic",
+			retryable: true,
+			statusCode: 429,
 		});
 	});
 
@@ -1633,7 +1648,10 @@ describe("useChatStore", () => {
 		});
 
 		await waitFor(() => {
-			expect(result.current.streamError).toBe("Chat processing failed.");
+			expect(result.current.streamError).toEqual({
+				kind: "generic",
+				message: "Chat processing failed.",
+			});
 		});
 	});
 
@@ -1684,6 +1702,8 @@ describe("useChatStore", () => {
 				retry: {
 					attempt: 2,
 					error: "upstream timeout",
+					kind: "timeout",
+					provider: "anthropic",
 					delay_ms: 5000,
 					retrying_at: "2025-01-01T00:01:00.000Z",
 				},
@@ -1694,6 +1714,10 @@ describe("useChatStore", () => {
 			expect(result.current.retryState).toEqual({
 				attempt: 2,
 				error: "upstream timeout",
+				kind: "timeout",
+				provider: "anthropic",
+				delayMs: 5000,
+				retryingAt: "2025-01-01T00:01:00.000Z",
 			});
 		});
 	});
@@ -1747,6 +1771,8 @@ describe("useChatStore", () => {
 				retry: {
 					attempt: 1,
 					error: "rate limited",
+					kind: "rate_limit",
+					provider: "anthropic",
 					delay_ms: 3000,
 					retrying_at: "2025-01-01T00:00:30.000Z",
 				},
@@ -1754,7 +1780,14 @@ describe("useChatStore", () => {
 		});
 
 		await waitFor(() => {
-			expect(result.current.retryState).not.toBeNull();
+			expect(result.current.retryState).toEqual({
+				attempt: 1,
+				error: "rate limited",
+				kind: "rate_limit",
+				provider: "anthropic",
+				delayMs: 3000,
+				retryingAt: "2025-01-01T00:00:30.000Z",
+			});
 		});
 
 		// Transition to running — should clear retry state.
@@ -1881,9 +1914,10 @@ describe("useChatStore", () => {
 		});
 
 		await waitFor(() => {
-			expect(result.current.streamError).toBe(
-				"Chat stream disconnected. Reconnecting\u2026",
-			);
+			expect(result.current.streamError).toEqual({
+				kind: "generic",
+				message: "Chat stream disconnected. Reconnecting\u2026",
+			});
 		});
 
 		// The reconnect timer fires after 1s. Since we're not
@@ -1957,7 +1991,10 @@ describe("useChatStore", () => {
 		});
 
 		await waitFor(() => {
-			expect(result.current.streamError).toBe("Rate limit exceeded");
+			expect(result.current.streamError).toEqual({
+				kind: "generic",
+				message: "Rate limit exceeded",
+			});
 		});
 
 		// WebSocket disconnect overwrites with reconnecting message
@@ -1968,9 +2005,10 @@ describe("useChatStore", () => {
 		});
 
 		await waitFor(() => {
-			expect(result.current.streamError).toBe(
-				"Chat stream disconnected. Reconnecting\u2026",
-			);
+			expect(result.current.streamError).toEqual({
+				kind: "generic",
+				message: "Chat stream disconnected. Reconnecting\u2026",
+			});
 		});
 	});
 	it("uses exponential backoff on consecutive disconnects", async () => {

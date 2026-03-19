@@ -1,63 +1,15 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
-import type * as TypesGen from "api/typesGenerated";
-import { expect, waitFor, within } from "storybook/test";
+import { expect, screen, waitFor, within } from "storybook/test";
 import { StreamingOutput } from "./ConversationTimeline";
-import { deriveLiveStatus } from "./liveStatusModel";
-import { applyMessagePartToStreamState, buildStreamTools } from "./streamState";
-import type { RetryState, StreamState } from "./types";
+import {
+	buildLiveStatus,
+	buildRetryState,
+	buildStreamRenderState,
+	textResponseStreamParts,
+} from "./storyFixtures";
 
 // StreamingOutput renders inside a ConversationItem > Message > MessageContent
 // chain, but it's self-contained enough to render standalone.
-
-const buildLiveStatus = (
-	overrides: Partial<Parameters<typeof deriveLiveStatus>[0]> = {},
-) =>
-	deriveLiveStatus({
-		streamState: null,
-		retryState: null,
-		streamError: null,
-		delayedStartup: false,
-		isAwaitingFirstStreamChunk: false,
-		...overrides,
-	});
-
-const buildStreamRenderState = (
-	parts: readonly TypesGen.ChatMessagePart[],
-): Pick<
-	React.ComponentProps<typeof StreamingOutput>,
-	"streamState" | "streamTools" | "liveStatus"
-> => {
-	let streamState: StreamState | null = null;
-	for (const part of parts) {
-		streamState = applyMessagePartToStreamState(
-			streamState,
-			part as unknown as Record<string, unknown>,
-		);
-	}
-	return {
-		streamState,
-		streamTools: buildStreamTools(streamState),
-		liveStatus: buildLiveStatus({ streamState }),
-	};
-};
-
-const buildRetryState = (overrides: Partial<RetryState> = {}): RetryState => ({
-	attempt: 1,
-	error:
-		"Anthropic is retrying your request after a transient upstream failure.",
-	kind: "generic",
-	provider: "anthropic",
-	delayMs: 2000,
-	retryingAt: "2026-03-10T00:00:02.000Z",
-	...overrides,
-});
-
-const resumedParts: TypesGen.ChatMessagePart[] = [
-	{
-		type: "text",
-		text: "Successfully connected after retry. Here is your answer...",
-	},
-];
 
 const meta: Meta<typeof StreamingOutput> = {
 	title: "pages/AgentsPage/AgentDetail/StreamingOutput",
@@ -138,6 +90,60 @@ export const RetryRateLimited: Story = {
 	},
 };
 
+/** Overloaded retries expose provider status links while retrying. */
+export const RetryOverloaded: Story = {
+	args: {
+		streamState: null,
+		streamTools: [],
+		liveStatus: buildLiveStatus({
+			retryState: buildRetryState({
+				kind: "overloaded",
+				provider: "anthropic",
+				error: "Anthropic is currently overloaded. Retrying your request.",
+			}),
+			isAwaitingFirstStreamChunk: true,
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(
+			canvas.getByRole("heading", { name: /service overloaded/i }),
+		).toBeVisible();
+		expect(canvas.getByText("overloaded")).toBeVisible();
+		const statusLink = screen.getByRole("link", { name: /status/i });
+		expect(statusLink).toBeVisible();
+		expect(statusLink).toHaveAttribute(
+			"href",
+			"https://status.anthropic.com",
+		);
+	},
+};
+
+/** Timeout retries render the timeout-specific heading without a status CTA. */
+export const RetryTimeout: Story = {
+	args: {
+		streamState: null,
+		streamTools: [],
+		liveStatus: buildLiveStatus({
+			retryState: buildRetryState({
+				kind: "timeout",
+				error: "The provider took too long to respond. Retrying now.",
+			}),
+			isAwaitingFirstStreamChunk: true,
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(
+			canvas.getByRole("heading", { name: /request time(?:out|d out)/i }),
+		).toBeVisible();
+		expect(canvas.getByText("timeout")).toBeVisible();
+		expect(
+			canvas.queryByRole("link", { name: /status/i }),
+		).not.toBeInTheDocument();
+	},
+};
+
 /** Retrying clears stale streamed content before rendering the callout. */
 export const RetryAfterPartialStream: Story = {
 	args: {
@@ -167,13 +173,11 @@ export const RetryAfterPartialStream: Story = {
 /** Active streaming after a retry no longer shows the retry callout. */
 export const StreamingAfterRetry: Story = {
 	args: {
-		...buildStreamRenderState(resumedParts),
+		...buildStreamRenderState(textResponseStreamParts),
 	},
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
-		expect(
-			canvas.getByText(/successfully connected after retry/i),
-		).toBeVisible();
+		expect(canvas.getByText(/storybook streamed answer/i)).toBeVisible();
 		expect(
 			canvas.queryByRole("heading", { name: /retrying request/i }),
 		).not.toBeInTheDocument();

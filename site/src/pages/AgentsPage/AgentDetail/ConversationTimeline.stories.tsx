@@ -1,11 +1,14 @@
 import type { Meta, StoryObj } from "@storybook/react-vite";
 import type * as TypesGen from "api/typesGenerated";
-import { expect, fn, userEvent, waitFor, within } from "storybook/test";
+import { expect, fn, screen, userEvent, waitFor, within } from "storybook/test";
 import { ConversationTimeline } from "./ConversationTimeline";
-import { deriveLiveStatus } from "./liveStatusModel";
 import { parseMessagesWithMergedTools } from "./messageParsing";
-import { applyMessagePartToStreamState, buildStreamTools } from "./streamState";
-import type { RetryState, StreamState } from "./types";
+import {
+	buildLiveStatus,
+	buildRetryState,
+	buildStreamRenderState,
+	textResponseStreamParts,
+} from "./storyFixtures";
 
 // 1×1 solid coral (#FF6B6B) PNG encoded as base64.
 const TEST_PNG_B64 =
@@ -18,18 +21,6 @@ const baseMessage = {
 	chat_id: "story-chat",
 	created_at: "2026-03-10T00:00:00.000Z",
 } as const;
-
-const buildLiveStatus = (
-	overrides: Partial<Parameters<typeof deriveLiveStatus>[0]> = {},
-) =>
-	deriveLiveStatus({
-		streamState: null,
-		retryState: null,
-		streamError: null,
-		delayedStartup: false,
-		isAwaitingFirstStreamChunk: false,
-		...overrides,
-	});
 
 const defaultArgs: Omit<
 	React.ComponentProps<typeof ConversationTimeline>,
@@ -44,44 +35,6 @@ const defaultArgs: Omit<
 	subagentStatusOverrides: new Map(),
 };
 
-const buildStreamRenderState = (
-	parts: readonly TypesGen.ChatMessagePart[],
-): Pick<
-	React.ComponentProps<typeof ConversationTimeline>,
-	"streamState" | "streamTools" | "liveStatus"
-> => {
-	let streamState: StreamState | null = null;
-	for (const part of parts) {
-		streamState = applyMessagePartToStreamState(
-			streamState,
-			part as unknown as Record<string, unknown>,
-		);
-	}
-	return {
-		streamState,
-		streamTools: buildStreamTools(streamState),
-		liveStatus: buildLiveStatus({ streamState }),
-	};
-};
-
-const buildRetryState = (overrides: Partial<RetryState> = {}): RetryState => ({
-	attempt: 2,
-	error:
-		"Anthropic is retrying your request after a transient upstream failure.",
-	kind: "generic",
-	provider: "anthropic",
-	delayMs: 2000,
-	retryingAt: "2026-03-10T00:00:02.000Z",
-	...overrides,
-});
-
-const resumedStreamParts: TypesGen.ChatMessagePart[] = [
-	{
-		type: "text",
-		text: "Connected after retry. Here is the final streamed answer.",
-	},
-];
-
 const retryThenResumeMessages = buildMessages([
 	{
 		...baseMessage,
@@ -93,7 +46,7 @@ const retryThenResumeMessages = buildMessages([
 	},
 ]);
 
-const retryThenResumedStream = buildStreamRenderState(resumedStreamParts);
+const retryThenResumedStream = buildStreamRenderState(textResponseStreamParts);
 
 const meta: Meta<typeof ConversationTimeline> = {
 	title: "pages/AgentsPage/AgentDetail/ConversationTimeline",
@@ -508,7 +461,7 @@ export const RetryWithReason: Story = {
 		parsedMessages: [],
 		hasStreamOutput: true,
 		liveStatus: buildLiveStatus({
-			retryState: buildRetryState(),
+			retryState: buildRetryState({ attempt: 2 }),
 			isAwaitingFirstStreamChunk: true,
 		}),
 	},
@@ -544,6 +497,42 @@ export const TerminalOverloadedError: Story = {
 		expect(canvas.getByText("overloaded")).toBeVisible();
 		expect(canvas.getByText(/http 529/i)).toBeVisible();
 		expect(canvas.getByRole("link", { name: /status/i })).toBeVisible();
+	},
+};
+
+/** Store-driven stream errors render the shared terminal callout without detailError. */
+export const StreamErrorTerminalFailure: Story = {
+	args: {
+		...defaultArgs,
+		parsedMessages: retryThenResumeMessages,
+		liveStatus: buildLiveStatus({
+			streamError: {
+				kind: "overloaded",
+				message: "Anthropic is currently overloaded. Please try again shortly.",
+				provider: "anthropic",
+				retryable: true,
+				statusCode: 529,
+			},
+		}),
+	},
+	play: async ({ canvasElement }) => {
+		const canvas = within(canvasElement);
+		expect(
+			canvas.getByText(/please try again if the provider flakes/i),
+		).toBeVisible();
+		const headings = screen.getAllByRole("heading", {
+			name: /service overloaded/i,
+		});
+		expect(headings).toHaveLength(1);
+		expect(headings[0]).toBeVisible();
+		expect(canvas.getByText("overloaded")).toBeVisible();
+		expect(canvas.getByText(/http 529/i)).toBeVisible();
+		const statusLink = canvas.getByRole("link", { name: /status/i });
+		expect(statusLink).toBeVisible();
+		expect(statusLink).toHaveAttribute(
+			"href",
+			"https://status.anthropic.com",
+		);
 	},
 };
 
@@ -608,11 +597,7 @@ export const RetryThenResumedStreaming: Story = {
 	play: async ({ canvasElement }) => {
 		const canvas = within(canvasElement);
 		await waitFor(() => {
-			expect(
-				canvas.getByText(
-					/connected after retry\. here is the final streamed answer\./i,
-				),
-			).toBeVisible();
+			expect(canvas.getByText(/storybook streamed answer/i)).toBeVisible();
 		});
 		expect(
 			canvas.queryByRole("heading", { name: /service overloaded/i }),

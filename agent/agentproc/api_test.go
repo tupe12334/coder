@@ -5,11 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -739,6 +741,133 @@ func TestProcessOutput(t *testing.T) {
 		require.NoError(t, err)
 		require.Contains(t, resp.Message, "not found")
 	})
+
+	t.Run("WaitForExit", func(t *testing.T) {
+		t.Parallel()
+
+		handler := newTestAPI(t)
+
+		id := startAndGetID(t, handler, workspacesdk.StartProcessRequest{
+			Command: "echo hello-wait && sleep 0.1",
+		})
+
+		w := getOutputWithWait(t, handler, id, math.MaxInt64)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp workspacesdk.ProcessOutputResponse
+		err := json.NewDecoder(w.Body).Decode(&resp)
+		require.NoError(t, err)
+		require.False(t, resp.Running)
+		require.NotNil(t, resp.ExitCode)
+		require.Equal(t, 0, *resp.ExitCode)
+		require.Contains(t, resp.Output, "hello-wait")
+	})
+
+	t.Run("WaitAlreadyExited", func(t *testing.T) {
+		t.Parallel()
+
+		handler := newTestAPI(t)
+
+		id := startAndGetID(t, handler, workspacesdk.StartProcessRequest{
+			Command: "echo done",
+		})
+
+		waitForExit(t, handler, id)
+
+		w := getOutputWithWait(t, handler, id, math.MaxInt64)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp workspacesdk.ProcessOutputResponse
+		err := json.NewDecoder(w.Body).Decode(&resp)
+		require.NoError(t, err)
+		require.False(t, resp.Running)
+		require.Contains(t, resp.Output, "done")
+	})
+
+	t.Run("WaitTimeout", func(t *testing.T) {
+		t.Parallel()
+
+		handler := newTestAPI(t)
+
+		id := startAndGetID(t, handler, workspacesdk.StartProcessRequest{
+			Command:    "sleep 300",
+			Background: true,
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), testutil.IntervalMedium)
+		defer cancel()
+
+		w := getOutputWithWaitCtx(ctx, t, handler, id, math.MaxInt64)
+		require.Equal(t, http.StatusOK, w.Code)
+
+		var resp workspacesdk.ProcessOutputResponse
+		err := json.NewDecoder(w.Body).Decode(&resp)
+		require.NoError(t, err)
+		require.True(t, resp.Running)
+
+		// Kill and wait for the process so cleanup does
+		// not hang.
+		postSignal(
+			t, handler, id,
+			workspacesdk.SignalProcessRequest{Signal: "kill"},
+		)
+		waitForExit(t, handler, id)
+	})
+
+	t.Run("ConcurrentWaiters", func(t *testing.T) {
+		t.Parallel()
+
+		handler := newTestAPI(t)
+
+		id := startAndGetID(t, handler, workspacesdk.StartProcessRequest{
+			Command:    "sleep 300",
+			Background: true,
+		})
+
+		var (
+			wg    sync.WaitGroup
+			resps [2]workspacesdk.ProcessOutputResponse
+			codes [2]int
+		)
+		for i := range 2 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				w := getOutputWithWait(t, handler, id, math.MaxInt64)
+				codes[i] = w.Code
+				_ = json.NewDecoder(w.Body).Decode(&resps[i])
+			}()
+		}
+
+		// Signal the process to exit so both waiters unblock.
+		postSignal(
+			t, handler, id,
+			workspacesdk.SignalProcessRequest{Signal: "kill"},
+		)
+
+		wg.Wait()
+
+		for i := range 2 {
+			require.Equal(t, http.StatusOK, codes[i], "waiter %d", i)
+			require.False(t, resps[i].Running, "waiter %d", i)
+		}
+	})
+}
+
+func getOutputWithWait(t *testing.T, handler http.Handler, id string, afterBytes int64) *httptest.ResponseRecorder {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.WaitLong)
+	defer cancel()
+	return getOutputWithWaitCtx(ctx, t, handler, id, afterBytes)
+}
+
+func getOutputWithWaitCtx(ctx context.Context, t *testing.T, handler http.Handler, id string, afterBytes int64) *httptest.ResponseRecorder {
+	t.Helper()
+	path := fmt.Sprintf("/%s/output?wait=true&after_bytes=%d", id, afterBytes)
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, path, nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	return w
 }
 
 func TestSignalProcess(t *testing.T) {

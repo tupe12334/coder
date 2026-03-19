@@ -1,11 +1,14 @@
 package agentproc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -16,6 +19,13 @@ import (
 	"github.com/coder/coder/v2/coderd/httpapi"
 	"github.com/coder/coder/v2/codersdk"
 	"github.com/coder/coder/v2/codersdk/workspacesdk"
+)
+
+const (
+	// maxWaitDuration is the maximum time a blocking
+	// process output request can wait, regardless of
+	// what the client requests.
+	maxWaitDuration = 5 * time.Minute
 )
 
 // API exposes process-related operations through the agent.
@@ -151,14 +161,48 @@ func (api *API) handleProcessOutput(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check for blocking mode via query params.
+	waitStr := r.URL.Query().Get("wait")
+	wantWait := waitStr == "true"
+
+	if wantWait {
+		afterBytesStr := r.URL.Query().Get("after_bytes")
+		afterBytes := int64(0)
+		if afterBytesStr != "" {
+			parsed, err := strconv.ParseInt(afterBytesStr, 10, 64)
+			if err != nil || parsed < 0 {
+				httpapi.Write(ctx, rw, http.StatusBadRequest, codersdk.Response{
+					Message: "after_bytes must be a non-negative integer.",
+				})
+				return
+			}
+			afterBytes = parsed
+		}
+
+		// Extend the write deadline so the HTTP server's
+		// WriteTimeout does not kill the connection while
+		// we block.
+		rc := http.NewResponseController(rw)
+		_ = rc.SetWriteDeadline(time.Now().Add(maxWaitDuration))
+
+		// Cap the wait at maxWaitDuration regardless of
+		// client-supplied timeout.
+		waitCtx, waitCancel := context.WithTimeout(ctx, maxWaitDuration)
+		defer waitCancel()
+
+		_ = proc.waitForOutput(waitCtx, int(afterBytes))
+		// Fall through to read snapshot below.
+	}
+
 	output, truncated := proc.output()
 	info := proc.info()
 
 	httpapi.Write(ctx, rw, http.StatusOK, workspacesdk.ProcessOutputResponse{
-		Output:    output,
-		Truncated: truncated,
-		Running:   info.Running,
-		ExitCode:  info.ExitCode,
+		Output:     output,
+		Truncated:  truncated,
+		Running:    info.Running,
+		ExitCode:   info.ExitCode,
+		TotalBytes: int64(proc.buf.TotalWritten()),
 	})
 }
 

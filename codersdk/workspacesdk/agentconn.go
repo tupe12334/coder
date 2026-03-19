@@ -70,7 +70,7 @@ type AgentConn interface {
 	ListeningPorts(ctx context.Context) (codersdk.WorkspaceAgentListeningPortsResponse, error)
 	Netcheck(ctx context.Context) (healthsdk.AgentNetcheckReport, error)
 	Ping(ctx context.Context) (time.Duration, bool, *ipnstate.PingResult, error)
-	ProcessOutput(ctx context.Context, id string) (ProcessOutputResponse, error)
+	ProcessOutput(ctx context.Context, id string, opts *ProcessOutputOptions) (ProcessOutputResponse, error)
 	PrometheusMetrics(ctx context.Context) ([]byte, error)
 	ReconnectingPTY(ctx context.Context, id uuid.UUID, height uint16, width uint16, command string, initOpts ...AgentReconnectingPTYInitOption) (net.Conn, error)
 	DeleteDevcontainer(ctx context.Context, devcontainerID string) error
@@ -709,10 +709,23 @@ type ProcessInfo struct {
 
 // ProcessOutputResponse contains the output of a process.
 type ProcessOutputResponse struct {
-	Output    string             `json:"output"`
-	Truncated *ProcessTruncation `json:"truncated,omitempty"`
-	Running   bool               `json:"running"`
-	ExitCode  *int               `json:"exit_code,omitempty"`
+	Output     string             `json:"output"`
+	Truncated  *ProcessTruncation `json:"truncated,omitempty"`
+	Running    bool               `json:"running"`
+	ExitCode   *int               `json:"exit_code,omitempty"`
+	TotalBytes int64              `json:"total_bytes"`
+}
+
+// ProcessOutputOptions configures blocking behavior for
+// process output retrieval.
+type ProcessOutputOptions struct {
+	// Wait enables blocking mode. When true, the request
+	// blocks until new output arrives or the process exits.
+	Wait bool
+	// AfterBytes blocks until the total bytes written
+	// exceeds this value. Use the TotalBytes from a
+	// previous response.
+	AfterBytes int64
 }
 
 // ProcessTruncation describes how process output was truncated.
@@ -946,10 +959,14 @@ func (c *agentConn) ListProcesses(ctx context.Context) (ListProcessesResponse, e
 }
 
 // ProcessOutput returns the output of a tracked process on the agent.
-func (c *agentConn) ProcessOutput(ctx context.Context, id string) (ProcessOutputResponse, error) {
+func (c *agentConn) ProcessOutput(ctx context.Context, id string, opts *ProcessOutputOptions) (ProcessOutputResponse, error) {
 	ctx, span := tracing.StartSpan(ctx)
 	defer span.End()
-	res, err := c.apiRequest(ctx, http.MethodGet, "/api/v0/processes/"+id+"/output", nil)
+	path := "/api/v0/processes/" + id + "/output"
+	if opts != nil && opts.Wait {
+		path += "?wait=true&after_bytes=" + strconv.FormatInt(opts.AfterBytes, 10)
+	}
+	res, err := c.apiRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return ProcessOutputResponse{}, xerrors.Errorf("do request: %w", err)
 	}

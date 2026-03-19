@@ -33,8 +33,8 @@ import { ImageThumbnail } from "../AgentChatInput";
 import { ImageLightbox } from "../ImageLightbox";
 import type { ChatDetailError } from "../usageLimitMessage";
 import { ChatStatusCallout } from "./ChatStatusCallout";
-import { useSmoothStreamingText } from "./SmoothText";
 import { type LiveStatusModel, toFailedLiveStatus } from "./liveStatusModel";
+import { useSmoothStreamingText } from "./SmoothText";
 import type {
 	MergedTool,
 	ParsedMessageContent,
